@@ -1,8 +1,9 @@
 # ---- builder ----
 FROM python:3.13-slim AS builder
 
-# Install uv from the official image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+# Install uv from the official image, pinned to the version that resolved
+# uv.lock so `uv sync --frozen` is byte-for-byte reproducible
+COPY --from=ghcr.io/astral-sh/uv:0.8.11 /uv /bin/uv
 
 WORKDIR /app
 
