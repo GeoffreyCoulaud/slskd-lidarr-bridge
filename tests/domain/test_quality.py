@@ -69,14 +69,52 @@ def test_mp3_bitrate_within_tolerance_snaps_to_bucket() -> None:
     assert detect_quality([_mp3(208)]) == "MP3-192"
 
 
+def test_mp3_128_returns_MP3_128() -> None:
+    assert detect_quality([_mp3(128)]) == "MP3-128"
+
+
+def test_mp3_140_within_tolerance_snaps_to_128() -> None:
+    # 140 is within ±16 of 128
+    assert detect_quality([_mp3(140)]) == "MP3-128"
+
+
 def test_mp3_bitrate_outside_all_buckets_returns_bare_MP3() -> None:
     # 100 is not within ±16 of any bucket
     assert detect_quality([_mp3(100)]) == "MP3"
 
 
+def test_mp3_128_boundary() -> None:
+    # 112 is exactly ±16 from 128 → snaps to MP3-128
+    assert detect_quality([_mp3(112)]) == "MP3-128"
+    # 111 is 17 away from 128 (outside tolerance) and far from all other buckets → bare MP3
+    assert detect_quality([_mp3(111)]) == "MP3"
+
+
+def test_mp3_multi_file_homogeneous_median() -> None:
+    # median([320, 320, 192]) = 320 → MP3-320
+    files = [_mp3(320), _mp3(320), _mp3(192)]
+    assert detect_quality(files) == "MP3-320"
+
+
+def test_mp3_multi_file_mixed_extreme_median() -> None:
+    # median([320, 128]) = 224; |224-256|=32 > 16, |224-192|=32 > 16 → bare MP3
+    files = [_mp3(320), _mp3(128)]
+    assert detect_quality(files) == "MP3"
+
+
 # ---------------------------------------------------------------------------
 # Other formats
 # ---------------------------------------------------------------------------
+
+
+def test_ape_falls_through_to_Unknown() -> None:
+    # .ape is outside the Lidarr quality-label spec; unmapped → "Unknown"
+    assert detect_quality([_ext(".ape")]) == "Unknown"
+
+
+def test_wma_falls_through_to_Unknown() -> None:
+    # .wma is outside the Lidarr quality-label spec; unmapped → "Unknown"
+    assert detect_quality([_ext(".wma")]) == "Unknown"
 
 
 def test_m4a_returns_AAC() -> None:
@@ -142,3 +180,9 @@ def test_non_audio_files_ignored() -> None:
         extension=".jpg",
     )
     assert detect_quality([non_audio]) == "Unknown"
+
+
+def test_lossless_tie_prefers_flac() -> None:
+    # 2 flac, 2 wav → tie among lossless → FLAC wins by priority
+    files = [_flac(), _flac(), _ext(".wav"), _ext(".wav")]
+    assert detect_quality(files) == "FLAC"

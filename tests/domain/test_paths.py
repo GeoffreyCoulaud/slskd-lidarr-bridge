@@ -41,3 +41,10 @@ def test_mixed_separators_in_remote_path() -> None:
         r"@@u\Music/Artist\Album/track.flac",
     )
     assert result == "/downloads/Album"
+
+
+def test_root_level_file_raises() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="remote_filename has no album folder"):
+        compute_storage_path("/downloads", "01.flac")

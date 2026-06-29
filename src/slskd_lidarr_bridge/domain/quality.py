@@ -9,6 +9,8 @@ from typing import Sequence
 from slskd_lidarr_bridge.domain.models import AudioFile
 
 # Map lowercase extensions to format family labels.
+# Note: .ape and .wma are valid audio extensions (models.AUDIO_EXTENSIONS) but
+# are outside the Lidarr quality-label spec, so they are intentionally omitted.
 _EXT_TO_FAMILY: dict[str, str] = {
     ".flac": "FLAC",
     ".alac": "ALAC",
@@ -18,12 +20,13 @@ _EXT_TO_FAMILY: dict[str, str] = {
     ".aac": "AAC",
     ".ogg": "OGG",
     ".opus": "OGG",
-    ".wma": "WMA",
-    ".ape": "APE",
 }
 
 # Lossless families (prefer these on tie).
-_LOSSLESS: frozenset[str] = frozenset({"FLAC", "ALAC", "WAV", "APE"})
+_LOSSLESS: frozenset[str] = frozenset({"FLAC", "ALAC", "WAV"})
+
+# Explicit priority order for lossless tie-breaks: FLAC > ALAC > WAV.
+_LOSSLESS_PRIORITY: tuple[str, ...] = ("FLAC", "ALAC", "WAV")
 
 # Ordered bitrate buckets for MP3; snap when within ±16 kbps.
 _MP3_BUCKETS: tuple[int, ...] = (320, 256, 192, 128)
@@ -36,6 +39,9 @@ def _mp3_suffix(bitrates: list[int | None]) -> str:
     if not known:
         return ""
     median_br = int(statistics.median(known))
+    # Snap to the nearest standard bucket within ±16 kbps (brief-mandated
+    # examples: 312→320, 272→256, 208→192).  Values outside tolerance yield
+    # a bare "MP3" label (no suffix).
     for bucket in _MP3_BUCKETS:
         if abs(median_br - bucket) <= _MP3_TOLERANCE:
             return f"-{bucket}"
@@ -70,9 +76,15 @@ def detect_quality(files: Sequence[AudioFile]) -> str:
     top_count = family_counts.most_common(1)[0][1]
     candidates = [fam for fam, cnt in family_counts.items() if cnt == top_count]
 
-    # Prefer lossless on tie.
+    # Prefer lossless on tie; among lossless candidates, use explicit priority.
     lossless_candidates = [c for c in candidates if c in _LOSSLESS]
-    winner = lossless_candidates[0] if lossless_candidates else candidates[0]
+    if lossless_candidates:
+        winner = next(
+            (p for p in _LOSSLESS_PRIORITY if p in lossless_candidates),
+            lossless_candidates[0],
+        )
+    else:
+        winner = candidates[0]
 
     if winner == "MP3":
         suffix = _mp3_suffix(family_bitrates.get("MP3", []))

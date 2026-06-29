@@ -25,6 +25,9 @@ def compute_storage_path(downloads_dir: str, remote_filename: str) -> str:
     # Normalize Windows-style separators so PurePosixPath handles both.
     normalized_remote = remote_filename.replace("\\", "/")
     album_folder = PurePosixPath(normalized_remote).parent.name
-    # Strip any trailing slash from downloads_dir before joining.
-    base = downloads_dir.rstrip("/")
+    if not album_folder:
+        raise ValueError(f"remote_filename has no album folder: {remote_filename!r}")
+    # Strip any trailing slash; guard against "/" → "" which would produce a
+    # relative path.  If stripping empties the string, treat base as "/".
+    base = downloads_dir.rstrip("/") or "/"
     return posixpath.join(base, album_folder)
