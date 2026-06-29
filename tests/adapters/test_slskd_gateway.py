@@ -68,6 +68,8 @@ def test_search_is_complete_false():
 # search_responses
 # ---------------------------------------------------------------------------
 
+# Extension field is unreliable: peer2's file has extension="" and "MP3" (wrong/unreliable)
+# but the filename carries the ground truth. We also include an extensionless filename.
 SEARCH_RESPONSES_PAYLOAD = [
     {
         "username": "peer1",
@@ -78,14 +80,14 @@ SEARCH_RESPONSES_PAYLOAD = [
             {
                 "filename": r"@@peer1\Music\Artist\Album\01 - Track.flac",
                 "size": 30000000,
-                "extension": "flac",
+                "extension": "flac",   # field may be present but we derive from filename
                 "bitRate": 1000,
                 "length": 240,
             },
             {
-                "filename": r"@@peer1\Music\Artist\Album\02 - Track.flac",
+                "filename": r"@@peer1\Music\Artist\Album\02 - Track.FLAC",
                 "size": 25000000,
-                "extension": ".FLAC",  # already has dot, uppercase
+                "extension": ".FLAC",  # unreliable casing — we derive from filename
                 "bitRate": 900,
                 "length": 180,
             },
@@ -98,12 +100,29 @@ SEARCH_RESPONSES_PAYLOAD = [
         "queueLength": 3,
         "files": [
             {
+                # extension field is "" (empty/wrong), but filename ends .mp3 — must use filename
                 "filename": r"@@peer2\Music\Artist\Album\01.mp3",
                 "size": 8000000,
-                "extension": "",  # empty extension
+                "extension": "",
                 "bitRate": 320,
                 "length": 200,
-            }
+            },
+            {
+                # extension field is "MP3" (wrong/unreliable), but filename ends .mp3
+                "filename": r"@@peer2\Music\Artist\Album\02.mp3",
+                "size": 7500000,
+                "extension": "MP3",
+                "bitRate": 256,
+                "length": 195,
+            },
+            {
+                # no dot in basename — extension must be None
+                "filename": r"@@peer2\Music\Artist\Album.2020\readme",
+                "size": 1024,
+                "extension": "",
+                "bitRate": None,
+                "length": None,
+            },
         ],
     },
 ]
@@ -130,16 +149,27 @@ def test_search_responses_parses_responses():
     f1 = r1.files[0]
     assert f1.filename == r"@@peer1\Music\Artist\Album\01 - Track.flac"
     assert f1.size == 30000000
-    assert f1.extension == ".flac"   # normalized: lowercased, with leading dot
+    assert f1.extension == ".flac"   # derived from filename (lowercase, leading dot)
     assert f1.bitrate == 1000
     assert f1.length == 240
 
     f2 = r1.files[1]
-    assert f2.extension == ".flac"   # was ".FLAC" → lowercased
+    assert f2.extension == ".flac"   # filename ends .FLAC → lowercased to .flac
 
     r2 = responses[1]
+    assert len(r2.files) == 3
+
     f3 = r2.files[0]
-    assert f3.extension is None      # empty string → None
+    # extension field is "" but filename is 01.mp3 → must derive ".mp3" from filename
+    assert f3.extension == ".mp3"
+
+    f4 = r2.files[1]
+    # extension field is "MP3" (wrong/unreliable) but filename is 02.mp3 → ".mp3"
+    assert f4.extension == ".mp3"
+
+    f5 = r2.files[2]
+    # basename is "readme" (no dot) → None, even though directory has "Album.2020"
+    assert f5.extension is None
 
 
 # ---------------------------------------------------------------------------
@@ -174,51 +204,60 @@ def test_enqueue_posts_file_list():
 # transfers
 # ---------------------------------------------------------------------------
 
-TRANSFERS_PAYLOAD = [
-    {
-        "directory": r"@@peer1\Music\Artist\Album",
-        "files": [
-            {
-                "id": "transfer-id-1",
-                "username": "peer1",
-                "filename": r"@@peer1\Music\Artist\Album\01.flac",
-                "size": 30000000,
-                "state": "Completed, Succeeded",
-                "bytesTransferred": 30000000,
-                "bytesRemaining": 0,
-                "percentComplete": 100.0,
-                "exception": None,
-            },
-            {
-                "id": "transfer-id-2",
-                "username": "peer1",
-                "filename": r"@@peer1\Music\Artist\Album\02.flac",
-                "size": 25000000,
-                "state": "InProgress",
-                "bytesTransferred": 12500000,
-                "bytesRemaining": 12500000,
-                "percentComplete": 50.0,
-                "exception": None,
-            },
-        ],
-    },
-    {
-        "directory": r"@@peer1\Music\Other",
-        "files": [
-            {
-                "id": "transfer-id-3",
-                "username": "peer1",
-                "filename": r"@@peer1\Music\Other\cover.jpg",
-                "size": 100000,
-                "state": "Completed, TimedOut",
-                "bytesTransferred": 0,
-                "bytesRemaining": 100000,
-                "percentComplete": 0.0,
-                "exception": "Connection timed out",
-            }
-        ],
-    },
-]
+# Real slskd shape: a single JSON OBJECT with "username" and "directories" keys.
+TRANSFERS_PAYLOAD = {
+    "username": "peer1",
+    "directories": [
+        {
+            "directory": r"@@peer1\Music\Artist\Album",
+            "fileCount": 2,
+            "files": [
+                {
+                    "id": "transfer-id-1",
+                    "username": "peer1",
+                    "direction": "Download",
+                    "filename": r"@@peer1\Music\Artist\Album\01.flac",
+                    "size": 30000000,
+                    "state": "Completed, Succeeded",
+                    "bytesTransferred": 30000000,
+                    "bytesRemaining": 0,
+                    "percentComplete": 100.0,
+                    "exception": None,
+                },
+                {
+                    "id": "transfer-id-2",
+                    "username": "peer1",
+                    "direction": "Download",
+                    "filename": r"@@peer1\Music\Artist\Album\02.flac",
+                    "size": 25000000,
+                    "state": "InProgress",
+                    "bytesTransferred": 12500000,
+                    "bytesRemaining": 12500000,
+                    "percentComplete": 50.0,
+                    "exception": None,
+                },
+            ],
+        },
+        {
+            "directory": r"@@peer1\Music\Other",
+            "fileCount": 1,
+            "files": [
+                {
+                    "id": "transfer-id-3",
+                    "username": "peer1",
+                    "direction": "Download",
+                    "filename": r"@@peer1\Music\Other\cover.jpg",
+                    "size": 100000,
+                    "state": "Completed, TimedOut",
+                    "bytesTransferred": 0,
+                    "bytesRemaining": 100000,
+                    "percentComplete": 0.0,
+                    "exception": "Connection timed out",
+                }
+            ],
+        },
+    ],
+}
 
 
 @respx.mock
@@ -253,6 +292,18 @@ def test_transfers_flattens_directories():
     t3 = transfers[2]
     assert t3.exception == "Connection timed out"
     assert t3.is_failed is True
+
+
+@respx.mock
+def test_transfers_returns_empty_list_on_404():
+    """A 404 from slskd means no downloads for this user — return [], do not raise."""
+    username = "peer-with-no-downloads"
+    respx.get(f"{BASE_URL}/api/v0/downloads/{username}").mock(
+        return_value=httpx.Response(404)
+    )
+    gw, _ = make_gateway()
+    result = gw.transfers(username)
+    assert result == []
 
 
 # ---------------------------------------------------------------------------

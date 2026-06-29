@@ -7,17 +7,27 @@ from slskd_lidarr_bridge.domain.models import AudioFile, SearchResponse, Transfe
 from slskd_lidarr_bridge.domain.ports import SoulseekGateway
 
 
-def _normalise_extension(raw: str | None) -> str | None:
-    """Normalise a file extension to lowercased '.ext' or None.
+def _extension_from_filename(filename: str) -> str | None:
+    """Derive a file extension from the full filename path.
 
-    slskd may send 'flac', '.FLAC', '' or None — we normalise all cases.
+    slskd's ``extension`` field is unreliable (no leading dot, arbitrary
+    case, often empty/null).  Derive from the filename instead:
+
+    * take the last path component (split on both ``\\`` and ``/``)
+    * extract text after the last ``.`` in the basename, lowercase it,
+      prepend a dot
+    * return ``None`` if the basename contains no dot
+
+    Examples::
+
+        "\\\\A\\\\Album\\\\01 Track.FLAC"  →  ".flac"
+        "\\\\A\\\\Album.2020\\\\readme"    →  None   (no dot in basename)
+        "\\\\A\\\\Album\\\\readme"         →  None
     """
-    if not raw:
+    basename = filename.replace("\\", "/").split("/")[-1]
+    if "." not in basename:
         return None
-    ext = raw.lower()
-    if not ext.startswith("."):
-        ext = "." + ext
-    return ext
+    return "." + basename.rsplit(".", 1)[-1].lower()
 
 
 class SlskdGateway:
@@ -83,7 +93,7 @@ class SlskdGateway:
                 AudioFile(
                     filename=f["filename"],
                     size=f["size"],
-                    extension=_normalise_extension(f.get("extension")),
+                    extension=_extension_from_filename(f["filename"]),
                     bitrate=f.get("bitRate"),
                     length=f.get("length"),
                 )
@@ -114,9 +124,11 @@ class SlskdGateway:
         so local_path is always None.
         """
         r = self._client.get(f"/api/v0/downloads/{username}")
+        if r.status_code == 404:
+            return []
         r.raise_for_status()
         result: list[Transfer] = []
-        for directory in r.json():
+        for directory in r.json().get("directories", []):
             for f in directory.get("files", []):
                 result.append(
                     Transfer(
