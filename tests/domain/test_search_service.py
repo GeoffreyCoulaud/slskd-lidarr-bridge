@@ -307,6 +307,36 @@ def test_non_audio_files_excluded():
     assert len(releases[0].files) == 1
 
 
+def test_response_with_no_audio_files_is_skipped():
+    """A response whose files are all non-audio yields no release; a sibling
+    response with audio still produces one."""
+    only_non_audio = make_response(
+        "noaudio",
+        [
+            AudioFile(
+                filename=r"@@a\Artist\Album\cover.jpg",
+                size=100_000,
+                extension=".jpg",
+            ),
+            AudioFile(
+                filename=r"@@a\Artist\Album\notes.txt",
+                size=2_000,
+                extension=".txt",
+            ),
+        ],
+    )
+    with_audio = make_response("hasaudio", [make_flac("Album", 1)])
+    gateway = FakeGateway(completes_on=1, responses=[only_non_audio, with_audio])
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock)
+
+    releases = service.search(SearchQuery(artist="A", album="B"))
+
+    assert len(releases) == 1
+    assert releases[0].username == "hasaudio"
+
+
 def test_term_only_query_splits_folder_on_dash():
     """When query has only term and folder contains ' - ', derive artist and album."""
     f = AudioFile(

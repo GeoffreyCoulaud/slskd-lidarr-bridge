@@ -388,3 +388,23 @@ class TestDelete:
         resp = client.get("/sabnzbd/api?mode=history&name=delete&value=nzo456")
         assert resp.status_code == 200
         assert "nzo456" in svc.removed
+
+
+# ---------------------------------------------------------------------------
+# Tests: unknown mode
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownMode:
+    def test_unknown_mode_returns_status_false_with_error(self):
+        svc = FakeDownloadService()
+        client = _make_app(download_service=svc).test_client()
+        resp = client.get("/sabnzbd/api?mode=frobnicate")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] is False
+        assert data["error"] == "Unknown mode: frobnicate"
+        # An unknown mode must not start or remove anything.
+        assert svc.started == []
+        assert svc.removed == []

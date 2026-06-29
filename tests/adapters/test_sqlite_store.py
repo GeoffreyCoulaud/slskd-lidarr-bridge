@@ -154,6 +154,24 @@ def test_release_put_on_memory_db():
     assert fetched.album == rel.album
 
 
+def test_release_naive_created_at_is_read_back_as_utc(tmp_path):
+    """A release stored with a tz-naive created_at is read back as UTC-aware.
+
+    The DB column is plain ISO-8601 text, so a naive timestamp round-trips
+    without an offset; on read it must be interpreted as UTC (not left naive),
+    otherwise downstream tz-aware comparisons would raise TypeError.
+    """
+    rs, _ = open_stores(str(tmp_path / "db.sqlite"))
+    naive = datetime(2024, 6, 1, 12, 0, 0)  # no tzinfo
+    assert naive.tzinfo is None
+    rid = rs.put(make_release(created_at=naive))
+
+    fetched = rs.get(rid)
+    assert fetched is not None
+    assert fetched.created_at.tzinfo is not None
+    assert fetched.created_at == datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
+
+
 # ---------------------------------------------------------------------------
 # JobStore tests
 # ---------------------------------------------------------------------------

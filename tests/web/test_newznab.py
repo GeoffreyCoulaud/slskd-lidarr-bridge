@@ -232,6 +232,27 @@ class TestTermSearch:
 
 
 # ---------------------------------------------------------------------------
+# Tests: unknown function
+# ---------------------------------------------------------------------------
+
+
+class TestUnknownFunction:
+    def test_unknown_t_returns_newznab_error_202(self):
+        svc = FakeSearchService()
+        client = _make_app(search_service=svc).test_client()
+        resp = client.get("/indexer/api?t=bogus")
+
+        assert resp.status_code == 200
+        assert "xml" in resp.content_type
+        root = ET.fromstring(resp.data)
+        assert root.tag == "error"
+        assert root.get("code") == "202"
+        assert root.get("description") == "No such function: bogus"
+        # An unknown function must never reach the search backend.
+        assert svc.called_with == []
+
+
+# ---------------------------------------------------------------------------
 # Tests: NZB route
 # ---------------------------------------------------------------------------
 

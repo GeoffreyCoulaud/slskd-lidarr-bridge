@@ -1,3 +1,5 @@
+import base64
+import json
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -69,3 +71,37 @@ def test_parse_nzb_raises_value_error_on_missing_meta():
     )
     with pytest.raises(ValueError):
         parse_nzb(bare)
+
+
+def test_parse_nzb_raises_when_payload_meta_is_empty():
+    """A payload meta element that exists but carries no text raises a distinct
+    ValueError (the 'empty' branch, not the 'not found' branch)."""
+    root = ET.Element(f"{{{NZB_NS}}}nzb")
+    head = ET.SubElement(root, f"{{{NZB_NS}}}head")
+    meta = ET.SubElement(head, f"{{{NZB_NS}}}meta")
+    meta.set("type", "x-slskd-payload")
+    # Intentionally leave meta.text as None → empty element.
+    data = ET.tostring(root, encoding="UTF-8")
+
+    with pytest.raises(ValueError, match="empty"):
+        parse_nzb(data)
+
+
+def test_parse_nzb_skips_foreign_meta_and_finds_payload():
+    """A <meta> of another type (e.g. type='title') is skipped so the
+    x-slskd-payload meta is still found further down the document."""
+    encoded = base64.b64encode(
+        json.dumps(PAYLOAD, ensure_ascii=False).encode()
+    ).decode()
+
+    root = ET.Element(f"{{{NZB_NS}}}nzb")
+    head = ET.SubElement(root, f"{{{NZB_NS}}}head")
+    foreign = ET.SubElement(head, f"{{{NZB_NS}}}meta")
+    foreign.set("type", "title")
+    foreign.text = "Some Title"
+    real = ET.SubElement(head, f"{{{NZB_NS}}}meta")
+    real.set("type", "x-slskd-payload")
+    real.text = encoded
+    data = ET.tostring(root, encoding="UTF-8")
+
+    assert parse_nzb(data) == PAYLOAD

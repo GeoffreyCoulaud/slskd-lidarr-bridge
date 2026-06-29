@@ -13,6 +13,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-cov>=5",
     "respx>=0.21",
     "ruff>=0.9",
     "mypy>=1.13",
@@ -28,6 +29,15 @@ packages = ["src/slskd_lidarr_bridge"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+addopts = "--cov --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["slskd_lidarr_bridge"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
 
 [tool.ruff]
 target-version = "py312"
