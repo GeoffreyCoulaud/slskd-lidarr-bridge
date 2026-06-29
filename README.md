@@ -1,6 +1,6 @@
 # slskd-lidarr-bridge
 
-A lightweight bridge that exposes [slskd](https://github.com/slsknet/slskd) (a Soulseek daemon) to [Lidarr](https://lidarr.audio/) as both a **Newznab indexer** and a **SABnzbd download client**, letting Lidarr search Soulseek for music, download NZB "tickets", and track transfer progress — all without any Usenet infrastructure.
+A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Soulseek daemon) look like Usenet to [Lidarr](https://lidarr.audio/). It impersonates a **Newznab indexer** and a **SABnzbd download client**, so Lidarr searches, downloads, and tracks music from Soulseek using its normal Usenet workflow.
 
 ## Environment variables
 
