@@ -1,12 +1,8 @@
 """Tests for the Flask app factory (Task 17)."""
 from __future__ import annotations
 
-import io
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-
-import flask
-import pytest
 
 from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob
@@ -202,7 +198,7 @@ class TestCreateApp:
 
 class TestErrorHandlers:
     def test_indexer_service_error_returns_error_xml(self):
-        """An exception from the search service returns error XML, not a 500 trace."""
+        """An exception from the search service returns error XML at HTTP 200."""
         config = _make_config()
         app = create_app(
             config,
@@ -212,6 +208,8 @@ class TestErrorHandlers:
             FakeClock(),
         )
         resp = app.test_client().get("/indexer/api?t=music&artist=A&album=B")
+        assert resp.status_code == 200
+        assert "xml" in resp.content_type
         # Must be parseable XML with tag <error>
         root = ET.fromstring(resp.data)
         assert root.tag == "error"
@@ -220,7 +218,7 @@ class TestErrorHandlers:
         assert b"Traceback" not in resp.data
 
     def test_sabnzbd_service_error_returns_json_status_false(self):
-        """An exception from download_service.statuses() returns JSON status:false."""
+        """An exception from download_service.statuses() returns JSON status:false at HTTP 200."""
         config = _make_config()
         app = create_app(
             config,
@@ -230,6 +228,7 @@ class TestErrorHandlers:
             FakeClock(),
         )
         resp = app.test_client().get("/sabnzbd/api?mode=queue")
+        assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] is False
         assert "error" in data

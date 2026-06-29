@@ -73,6 +73,8 @@ def create_sabnzbd_blueprint(
 
         if mode == "addfile":
             file_storage = request.files.get("name")
+            if file_storage is None:
+                return jsonify({"status": False, "error": "no nzb file provided"})
             nzb_bytes = file_storage.read()
             payload = parse_nzb(nzb_bytes)
             category = request.form.get("cat", "")
@@ -86,7 +88,7 @@ def create_sabnzbd_blueprint(
                 download_service.remove(value)
                 return jsonify({"status": True})
 
-            cat_filter = request.args.get("category")
+            cat_filter = request.args.get("category") or request.args.get("cat")
             all_statuses = download_service.statuses()
             slots = []
             slot_index = 0
@@ -120,7 +122,7 @@ def create_sabnzbd_blueprint(
                 download_service.remove(value)
                 return jsonify({"status": True})
 
-            cat_filter = request.args.get("category")
+            cat_filter = request.args.get("category") or request.args.get("cat")
             all_statuses = download_service.statuses()
             slots = []
             for s in all_statuses:

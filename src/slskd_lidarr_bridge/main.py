@@ -36,15 +36,17 @@ def build_app(env: Mapping[str, str]) -> Flask:
     release_store, job_store = open_stores(config.db_path)
     gateway = SlskdGateway(config.slskd_url, config.slskd_api_key)
     clock = SystemClock()
-    return create_app(config, gateway, release_store, job_store, clock)
+    app = create_app(config, gateway, release_store, job_store, clock)
+    app.config["BRIDGE_CONFIG"] = config
+    return app
 
 
 def main() -> None:
     """Start the waitress WSGI server using environment configuration."""
     import waitress
 
-    config = Config.from_env(os.environ)
     app = build_app(os.environ)
+    config = app.config["BRIDGE_CONFIG"]
     waitress.serve(app, host=config.bridge_host, port=config.bridge_port)
 
 

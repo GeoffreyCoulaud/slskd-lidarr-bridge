@@ -5,7 +5,6 @@ import io
 from datetime import datetime, timezone
 
 import flask
-import pytest
 
 from slskd_lidarr_bridge.domain.models import JobStatusView
 from slskd_lidarr_bridge.web.nzb import build_nzb
@@ -211,6 +210,19 @@ class TestAddFile:
         assert payload["title"] == "Artist - Album [FLAC]"
         assert payload["album_folder"] == "Album"
 
+    def test_addfile_no_file_returns_status_false(self):
+        """POSTing addfile without a 'name' file field returns status:false (HTTP 200)."""
+        client = _make_app().test_client()
+        resp = client.post(
+            "/sabnzbd/api",
+            data={"mode": "addfile", "cat": "music"},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] is False
+        assert data["error"] == "no nzb file provided"
+
 
 # ---------------------------------------------------------------------------
 # Tests: queue
@@ -280,6 +292,18 @@ class TestQueue:
         assert "timeleft" in s
         assert "index" in s
 
+    def test_queue_filter_by_cat_alias(self):
+        """`cat=` query param filters queue the same way `category=` does."""
+        s1 = _make_status(nzo_id="j1", category="music", state="downloading")
+        s2 = _make_status(nzo_id="j2", category="ebooks", state="downloading")
+        client = _make_app(
+            download_service=FakeDownloadService(statuses=[s1, s2])
+        ).test_client()
+        resp = client.get("/sabnzbd/api?mode=queue&cat=music")
+        slots = resp.get_json()["queue"]["slots"]
+        assert len(slots) == 1
+        assert slots[0]["cat"] == "music"
+
 
 # ---------------------------------------------------------------------------
 # Tests: history
@@ -343,6 +367,18 @@ class TestHistory:
         s = resp.get_json()["history"]["slots"][0]
         assert s["nzb_name"] == status.title
         assert s["bytes"] == 10_000_000
+
+    def test_history_filter_by_cat_alias(self):
+        """`cat=` query param filters history the same way `category=` does."""
+        s1 = _make_status(nzo_id="j1", category="music", state="completed")
+        s2 = _make_status(nzo_id="j2", category="ebooks", state="completed")
+        client = _make_app(
+            download_service=FakeDownloadService(statuses=[s1, s2])
+        ).test_client()
+        resp = client.get("/sabnzbd/api?mode=history&cat=music")
+        slots = resp.get_json()["history"]["slots"]
+        assert len(slots) == 1
+        assert slots[0]["category"] == "music"
 
 
 # ---------------------------------------------------------------------------

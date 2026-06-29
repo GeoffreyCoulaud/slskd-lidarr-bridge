@@ -84,9 +84,9 @@ def create_app(
         if request.path.startswith("/indexer"):
             return flask.Response(
                 build_error(900, str(e)),
-                status=500,
+                status=200,
                 content_type="application/xml",
             )
-        return jsonify({"status": False, "error": str(e)}), 500
+        return jsonify({"status": False, "error": str(e)}), 200
 
     return app

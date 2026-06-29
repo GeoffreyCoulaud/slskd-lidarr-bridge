@@ -1,16 +1,14 @@
 """Tests for the Newznab indexer blueprint (Task 15)."""
 from __future__ import annotations
 
-import io
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 import flask
-import pytest
 
 from slskd_lidarr_bridge.domain.models import AudioFile, Release, SearchQuery
 from slskd_lidarr_bridge.web.newznab import create_newznab_blueprint
-from slskd_lidarr_bridge.web.nzb import build_nzb, parse_nzb
+from slskd_lidarr_bridge.web.nzb import parse_nzb
 
 # ---------------------------------------------------------------------------
 # Fakes
