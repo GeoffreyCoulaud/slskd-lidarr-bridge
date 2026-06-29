@@ -1,0 +1,92 @@
+"""Flask application factory (Task 17).
+
+Creates the Flask app, wires SearchService + DownloadService, registers the
+Newznab and SABnzbd blueprints, adds /health and error handlers.
+"""
+from __future__ import annotations
+
+import flask
+from flask import Flask, jsonify, request
+from werkzeug.exceptions import HTTPException
+
+from slskd_lidarr_bridge.config import Config
+from slskd_lidarr_bridge.domain.download_service import DownloadService
+from slskd_lidarr_bridge.domain.search_service import SearchService
+from slskd_lidarr_bridge.web.newznab import create_newznab_blueprint
+from slskd_lidarr_bridge.web.sabnzbd import create_sabnzbd_blueprint
+from slskd_lidarr_bridge.web.xml import build_error
+
+
+def create_app(
+    config: Config,
+    gateway,
+    release_store,
+    job_store,
+    clock,
+) -> Flask:
+    """Build and return the Flask application.
+
+    Args:
+        config: frozen Config instance.
+        gateway: SoulseekGateway implementation.
+        release_store: ReleaseStore implementation.
+        job_store: JobStore implementation.
+        clock: Clock implementation.
+
+    Returns:
+        A configured Flask application.
+    """
+    app = Flask(__name__)
+
+    search_service = SearchService(
+        gateway,
+        release_store,
+        clock,
+        search_timeout=config.search_timeout,
+        min_bitrate=config.min_bitrate,
+    )
+    download_service = DownloadService(
+        gateway,
+        job_store,
+        clock,
+        downloads_dir=config.slskd_downloads_dir,
+    )
+
+    newznab_bp = create_newznab_blueprint(
+        search_service,
+        release_store,
+        api_key=config.bridge_api_key,
+        categories=config.categories,
+    )
+    sabnzbd_bp = create_sabnzbd_blueprint(
+        download_service,
+        api_key=config.bridge_api_key,
+        categories=config.sab_categories,
+        complete_dir=config.slskd_downloads_dir,
+    )
+
+    app.register_blueprint(newznab_bp)
+    app.register_blueprint(sabnzbd_bp)
+
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "ok"})
+
+    @app.errorhandler(Exception)
+    def handle_exception(e: Exception):
+        # Re-raise HTTP exceptions (404, 405, …) so Flask handles them normally.
+        if isinstance(e, HTTPException):
+            return e
+
+        # Scope the error response by request path:
+        # - /indexer/* → Newznab XML error
+        # - everything else (including /sabnzbd/*) → JSON
+        if request.path.startswith("/indexer"):
+            return flask.Response(
+                build_error(900, str(e)),
+                status=500,
+                content_type="application/xml",
+            )
+        return jsonify({"status": False, "error": str(e)}), 500
+
+    return app
