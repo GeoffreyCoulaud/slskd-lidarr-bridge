@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from slskd_lidarr_bridge.domain.models import (
     AudioFile,
     Release,
     SearchQuery,
     SearchResponse,
+    Transfer,
 )
 from slskd_lidarr_bridge.domain.search_service import SearchService
-
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -49,8 +47,9 @@ class FakeGateway:
 
     # Unused in search service — satisfy Protocol
     def enqueue(self, username: str, files: list[AudioFile]) -> None: ...
-    def transfers(self, username: str) -> list:  # type: ignore[override]
+    def transfers(self, username: str) -> list[Transfer]:
         return []
+
     def cancel(self, username: str, transfer_id: str) -> None: ...
 
 
@@ -86,14 +85,14 @@ class FakeStorePurge(FakeStore):
 
 
 class FakeClock:
-    """Clock that records sleeps and advances now() by advance_per_sleep on each sleep."""
+    """Clock that records sleeps and advances now() by advance_per_sleep each time."""
 
     def __init__(
         self,
         start: datetime | None = None,
         advance_per_sleep: float = 1.0,
     ) -> None:
-        self._now = start or datetime(2024, 1, 1, tzinfo=timezone.utc)
+        self._now = start or datetime(2024, 1, 1, tzinfo=UTC)
         self._advance = advance_per_sleep
         self.sleeps: list[float] = []
 
@@ -216,15 +215,21 @@ def test_timeout_stops_polling_without_infinite_loop():
     result = service.search(SearchQuery(artist="A", album="B"))
 
     assert result == []
-    assert len(clock.sleeps) == 1  # exactly one sleep: elapsed hits timeout after first advance
+    assert (
+        len(clock.sleeps) == 1
+    )  # exactly one sleep: elapsed hits timeout after first advance
 
 
 def test_ordering_free_slot_before_no_slot():
     """Response with free upload slot sorts before faster-but-no-slot response."""
     file1 = make_flac("AlbumA", 1)
     file2 = make_flac("AlbumB", 1)
-    resp_free = make_response("alice", [file1], has_free_upload_slot=True, upload_speed=500_000)
-    resp_fast = make_response("bob", [file2], has_free_upload_slot=False, upload_speed=2_000_000)
+    resp_free = make_response(
+        "alice", [file1], has_free_upload_slot=True, upload_speed=500_000
+    )
+    resp_fast = make_response(
+        "bob", [file2], has_free_upload_slot=False, upload_speed=2_000_000
+    )
     gateway = FakeGateway(completes_on=1, responses=[resp_fast, resp_free])
     store = FakeStore()
     clock = FakeClock()
@@ -238,8 +243,18 @@ def test_ordering_free_slot_before_no_slot():
 
 
 def test_min_bitrate_filters_low_bitrate_files():
-    high = AudioFile(filename=r"@@a\Artist\Album\01.mp3", size=5_000_000, extension=".mp3", bitrate=320)
-    low = AudioFile(filename=r"@@a\Artist\Album\02.mp3", size=5_000_000, extension=".mp3", bitrate=128)
+    high = AudioFile(
+        filename=r"@@a\Artist\Album\01.mp3",
+        size=5_000_000,
+        extension=".mp3",
+        bitrate=320,
+    )
+    low = AudioFile(
+        filename=r"@@a\Artist\Album\02.mp3",
+        size=5_000_000,
+        extension=".mp3",
+        bitrate=128,
+    )
     response = make_response("alice", [high, low])
     gateway = FakeGateway(completes_on=1, responses=[response])
     store = FakeStore()
@@ -254,7 +269,7 @@ def test_min_bitrate_filters_low_bitrate_files():
 
 
 def test_min_bitrate_keeps_unknown_bitrate_files():
-    """Files with bitrate=None are kept when min_bitrate is set (conservative behavior)."""
+    """Files with bitrate=None are kept when min_bitrate is set (conservative)."""
     unknown_bitrate = AudioFile(
         filename=r"@@a\Artist\Album\01.flac",
         size=10_000_000,
@@ -276,7 +291,9 @@ def test_min_bitrate_keeps_unknown_bitrate_files():
 
 def test_non_audio_files_excluded():
     audio = make_flac("Album", 1)
-    cover = AudioFile(filename=r"@@a\Artist\Album\cover.jpg", size=100_000, extension=".jpg")
+    cover = AudioFile(
+        filename=r"@@a\Artist\Album\cover.jpg", size=100_000, extension=".jpg"
+    )
     response = make_response("alice", [audio, cover])
     gateway = FakeGateway(completes_on=1, responses=[response])
     store = FakeStore()

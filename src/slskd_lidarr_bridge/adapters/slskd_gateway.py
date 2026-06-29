@@ -1,10 +1,10 @@
 """slskd REST gateway adapter — implements SoulseekGateway over httpx."""
+
 from __future__ import annotations
 
 import httpx
 
 from slskd_lidarr_bridge.domain.models import AudioFile, SearchResponse, Transfer
-from slskd_lidarr_bridge.domain.ports import SoulseekGateway
 
 
 def _extension_from_filename(filename: str) -> str | None:
@@ -75,7 +75,8 @@ class SlskdGateway:
         """POST /api/v0/searches → return the new search id."""
         r = self._client.post("/api/v0/searches", json={"searchText": text})
         r.raise_for_status()
-        return r.json()["id"]
+        search_id: str = r.json()["id"]
+        return search_id
 
     def search_is_complete(self, search_id: str) -> bool:
         """GET /api/v0/searches/{id} → read isComplete."""
@@ -117,7 +118,7 @@ class SlskdGateway:
         r.raise_for_status()
 
     def transfers(self, username: str) -> list[Transfer]:
-        """GET /api/v0/transfers/downloads/{username} → flatten directories→files → list[Transfer].
+        """GET transfers for a user, flattening directories→files to list[Transfer].
 
         slskd groups transfers by directory; we flatten all files.
         Note: slskd does not expose a local on-disk path in this payload,

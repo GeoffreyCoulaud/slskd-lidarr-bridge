@@ -7,7 +7,8 @@ Uses stdlib only: xml.etree.ElementTree, email.utils, io.
 import email.utils
 import io
 import xml.etree.ElementTree as ET
-from datetime import timezone
+from datetime import UTC
+from typing import Any
 
 NEWZNAB_NS = "http://www.newznab.com/DTD/2010/feeds/attributes/"
 
@@ -23,6 +24,7 @@ def _to_bytes(tree: ET.ElementTree) -> bytes:
 # ---------------------------------------------------------------------------
 # build_caps
 # ---------------------------------------------------------------------------
+
 
 def build_caps(categories: list[tuple[int, str]]) -> bytes:
     """Build a Newznab <caps> XML response.
@@ -74,8 +76,9 @@ def build_caps(categories: list[tuple[int, str]]) -> bytes:
 # build_results_rss
 # ---------------------------------------------------------------------------
 
+
 def build_results_rss(
-    items: list[dict],
+    items: list[dict[str, Any]],
     channel_title: str = "slskd-bridge",
 ) -> bytes:
     """Build a Newznab results RSS 2.0 feed.
@@ -117,7 +120,7 @@ def build_results_rss(
         pub = ET.SubElement(item_el, "pubDate")
         pub_date = item["pubDate"]
         if pub_date.tzinfo is None:
-            pub_date = pub_date.replace(tzinfo=timezone.utc)
+            pub_date = pub_date.replace(tzinfo=UTC)
         pub.text = email.utils.format_datetime(pub_date)
 
         enc = ET.SubElement(item_el, "enclosure")
@@ -141,6 +144,7 @@ def build_results_rss(
 # ---------------------------------------------------------------------------
 # build_error
 # ---------------------------------------------------------------------------
+
 
 def build_error(code: int, description: str) -> bytes:
     """Build a Newznab <error> XML response.

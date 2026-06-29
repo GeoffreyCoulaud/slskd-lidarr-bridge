@@ -4,12 +4,16 @@ Exposes:
   GET /indexer/api   – dispatch on t=caps|search|music
   GET /indexer/nzb/<release_id>  – download NZB for a stored release
 """
+
 from __future__ import annotations
 
-import flask
+from typing import Any
+
 from flask import Blueprint, Response, abort, request, url_for
 
-from slskd_lidarr_bridge.domain.models import SearchQuery
+from slskd_lidarr_bridge.domain.models import Release, SearchQuery
+from slskd_lidarr_bridge.domain.ports import ReleaseStore
+from slskd_lidarr_bridge.domain.search_service import SearchService
 from slskd_lidarr_bridge.web.nzb import build_nzb
 from slskd_lidarr_bridge.web.xml import build_caps, build_error, build_results_rss
 
@@ -29,10 +33,9 @@ def _quality_to_category(quality: str) -> int:
 
 
 def create_newznab_blueprint(
-    search_service,
-    release_store,
+    search_service: SearchService,
+    release_store: ReleaseStore,
     *,
-    api_key: str | None,
     categories: list[tuple[int, str]],
 ) -> Blueprint:
     """Build and return the Newznab indexer Blueprint.
@@ -40,7 +43,6 @@ def create_newznab_blueprint(
     Args:
         search_service: implements SearchService.search(SearchQuery) -> list[Release].
         release_store: implements ReleaseStore.get(release_id) -> Release | None.
-        api_key: if set, every /indexer/api request must supply matching ``apikey`` query param.
         categories: list of (id, name) tuples forwarded to build_caps.
 
     Returns:
@@ -48,25 +50,8 @@ def create_newznab_blueprint(
     """
     bp = Blueprint("newznab", __name__, url_prefix="/indexer")
 
-    def _api_key_error() -> Response | None:
-        """Return an error Response if api_key is set and the request fails auth."""
-        if api_key is None:
-            return None
-        provided = request.args.get("apikey")
-        if provided != api_key:
-            return Response(
-                build_error(100, "Invalid API key"),
-                status=200,
-                content_type="application/xml",
-            )
-        return None
-
     @bp.route("/api")
     def api() -> Response:
-        err = _api_key_error()
-        if err is not None:
-            return err
-
         t = request.args.get("t", "")
 
         if t == "caps":
@@ -96,9 +81,9 @@ def create_newznab_blueprint(
             content_type="application/xml",
         )
 
-    def _build_rss(releases) -> bytes:
+    def _build_rss(releases: list[Release]) -> bytes:
         """Convert a list of Release objects to RSS bytes."""
-        items = []
+        items: list[dict[str, Any]] = []
         for release in releases:
             nzb_url = url_for("newznab.nzb", release_id=release.id, _external=True)
             category = _quality_to_category(release.quality)

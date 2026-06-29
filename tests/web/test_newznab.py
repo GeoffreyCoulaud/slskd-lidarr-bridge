@@ -1,8 +1,9 @@
 """Tests for the Newznab indexer blueprint (Task 15)."""
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import flask
 
@@ -14,7 +15,7 @@ from slskd_lidarr_bridge.web.nzb import parse_nzb
 # Fakes
 # ---------------------------------------------------------------------------
 
-CREATED_AT = datetime(2024, 1, 1, tzinfo=timezone.utc)
+CREATED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 
 NEWZNAB_NS = "http://www.newznab.com/DTD/2010/feeds/attributes/"
 
@@ -69,7 +70,6 @@ def _make_release(release_id: str = "test-id-001", quality: str = "FLAC") -> Rel
 def _make_app(
     search_service=None,
     release_store=None,
-    api_key=None,
     categories=None,
 ) -> flask.Flask:
     if search_service is None:
@@ -80,9 +80,7 @@ def _make_app(
         categories = [(3000, "Audio"), (3010, "Audio/MP3"), (3040, "Audio/Lossless")]
 
     app = flask.Flask(__name__)
-    bp = create_newznab_blueprint(
-        search_service, release_store, api_key=api_key, categories=categories
-    )
+    bp = create_newznab_blueprint(search_service, release_store, categories=categories)
     app.register_blueprint(bp)
     return app
 
@@ -148,6 +146,7 @@ class TestMusicSearch:
         enclosures = root.findall(".//enclosure")
         assert len(enclosures) == 1
         url = enclosures[0].get("url")
+        assert url is not None
         assert url.endswith("/indexer/nzb/test-id-001")
         assert enclosures[0].get("type") == "application/x-nzb"
 
@@ -277,40 +276,3 @@ class TestNzbRoute:
         cd = resp.headers.get("Content-Disposition", "")
         assert "attachment" in cd
         assert "test-id-001.nzb" in cd
-
-
-# ---------------------------------------------------------------------------
-# Tests: API key enforcement
-# ---------------------------------------------------------------------------
-
-
-class TestApiKey:
-    def test_missing_apikey_returns_error_100(self):
-        client = _make_app(api_key="secret").test_client()
-        resp = client.get("/indexer/api?t=caps")
-        assert resp.status_code == 200
-        root = ET.fromstring(resp.data)
-        assert root.tag == "error"
-        assert root.get("code") == "100"
-
-    def test_wrong_apikey_returns_error_100(self):
-        client = _make_app(api_key="secret").test_client()
-        resp = client.get("/indexer/api?t=caps&apikey=wrong")
-        assert resp.status_code == 200
-        root = ET.fromstring(resp.data)
-        assert root.tag == "error"
-        assert root.get("code") == "100"
-
-    def test_correct_apikey_passes_caps(self):
-        client = _make_app(api_key="secret").test_client()
-        resp = client.get("/indexer/api?t=caps&apikey=secret")
-        assert resp.status_code == 200
-        root = ET.fromstring(resp.data)
-        assert root.tag == "caps"
-
-    def test_no_api_key_configured_always_passes(self):
-        client = _make_app(api_key=None).test_client()
-        resp = client.get("/indexer/api?t=caps")
-        assert resp.status_code == 200
-        root = ET.fromstring(resp.data)
-        assert root.tag == "caps"

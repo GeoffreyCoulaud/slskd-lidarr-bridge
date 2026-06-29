@@ -4,11 +4,14 @@ from slskd_lidarr_bridge.domain.titles import build_title
 
 
 def test_basic_title_with_quality() -> None:
-    assert build_title("Radiohead", "In Rainbows", "FLAC") == "Radiohead - In Rainbows [FLAC]"
+    assert (
+        build_title("Radiohead", "In Rainbows", "FLAC")
+        == "Radiohead - In Rainbows [FLAC]"
+    )
 
 
 def test_path_hostile_chars_stripped() -> None:
-    # "/" in artist, ":" in album — both are path-hostile and must be replaced with space
+    # "/" in artist, ":" in album — both path-hostile, must be replaced with space
     result = build_title("A/B", "C: D", "MP3-320")
     assert result == "A B - C D [MP3-320]"
 

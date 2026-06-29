@@ -5,10 +5,11 @@ builds the gateway, constructs the Flask app via create_app.
 
 ``main()`` — starts the waitress WSGI server.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Mapping
+from collections.abc import Mapping
 
 from flask import Flask
 
@@ -47,7 +48,9 @@ def main() -> None:
 
     app = build_app(os.environ)
     config = app.config["BRIDGE_CONFIG"]
-    waitress.serve(app, host=config.bridge_host, port=config.bridge_port)
+    # Bind on all interfaces: the bridge runs in a container, reachable only
+    # via the Docker network / published port.
+    waitress.serve(app, host="0.0.0.0", port=config.bridge_port)
 
 
 if __name__ == "__main__":

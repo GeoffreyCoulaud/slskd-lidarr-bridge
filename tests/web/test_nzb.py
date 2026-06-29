@@ -12,8 +12,14 @@ PAYLOAD = {
     "album_folder": "Homogenic (1997) [FLAC]",
     "total_size": 999_999_999_999,
     "files": [
-        {"filename": r"@@some_user\Music\Björk\Homogenic\01.flac", "size": 499_999_999_999},
-        {"filename": r"@@some_user\Music\Björk\Homogenic\02.flac", "size": 500_000_000_000},
+        {
+            "filename": r"@@some_user\Music\Björk\Homogenic\01.flac",
+            "size": 499_999_999_999,
+        },
+        {
+            "filename": r"@@some_user\Music\Björk\Homogenic\02.flac",
+            "size": 500_000_000_000,
+        },
     ],
 }
 
@@ -41,7 +47,7 @@ def test_build_nzb_has_correct_namespace():
 
 
 def test_build_nzb_has_dummy_file_element():
-    """Produced NZB contains at least one <file> element so generic parsers don't choke."""
+    """Produced NZB has at least one <file> element so generic parsers don't choke."""
     data = build_nzb(PAYLOAD)
     root = ET.fromstring(data)
     files = root.findall(f"{{{NZB_NS}}}file")
@@ -56,7 +62,7 @@ def test_parse_nzb_raises_value_error_on_missing_meta():
         b'<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">'
         b"<head></head>"
         b'<file poster="" date="0" subject="">'
-        b'<groups><group>alt.binaries.test</group></groups>'
+        b"<groups><group>alt.binaries.test</group></groups>"
         b"<segments></segments>"
         b"</file>"
         b"</nzb>"

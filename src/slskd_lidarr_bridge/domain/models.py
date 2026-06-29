@@ -10,7 +10,7 @@ AUDIO_EXTENSIONS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class AudioFile:
-    filename: str  # full remote path, backslash-separated, e.g. r"@@a\Music\Artist\Album\01.flac"
+    filename: str  # full remote path, backslash-separated (e.g. r"@@a\Artist\01.flac")
     size: int  # bytes
     extension: str | None = None  # ".flac", ".mp3" (lowercased, with dot) or None
     bitrate: int | None = None  # kbps if known
@@ -18,7 +18,7 @@ class AudioFile:
 
     @property
     def album_folder(self) -> str:
-        """Last directory component of filename (split on backslash and forward slash)."""
+        """Last directory component of filename (split on back/forward slash)."""
         # Normalize backslashes to forward slashes
         normalized = self.filename.replace("\\", "/")
         parts = normalized.split("/")

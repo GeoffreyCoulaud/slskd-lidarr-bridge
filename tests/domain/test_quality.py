@@ -86,7 +86,7 @@ def test_mp3_bitrate_outside_all_buckets_returns_bare_MP3() -> None:
 def test_mp3_128_boundary() -> None:
     # 112 is exactly ±16 from 128 → snaps to MP3-128
     assert detect_quality([_mp3(112)]) == "MP3-128"
-    # 111 is 17 away from 128 (outside tolerance) and far from all other buckets → bare MP3
+    # 111 is 17 from 128 (outside tolerance) and far from all buckets → bare MP3
     assert detect_quality([_mp3(111)]) == "MP3"
 
 

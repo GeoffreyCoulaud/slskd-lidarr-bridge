@@ -3,14 +3,22 @@
 Creates the Flask app, wires SearchService + DownloadService, registers the
 Newznab and SABnzbd blueprints, adds /health and error handlers.
 """
+
 from __future__ import annotations
 
 import flask
 from flask import Flask, jsonify, request
+from flask.typing import ResponseReturnValue
 from werkzeug.exceptions import HTTPException
 
 from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.domain.download_service import DownloadService
+from slskd_lidarr_bridge.domain.ports import (
+    Clock,
+    JobStore,
+    ReleaseStore,
+    SoulseekGateway,
+)
 from slskd_lidarr_bridge.domain.search_service import SearchService
 from slskd_lidarr_bridge.web.newznab import create_newznab_blueprint
 from slskd_lidarr_bridge.web.sabnzbd import create_sabnzbd_blueprint
@@ -19,10 +27,10 @@ from slskd_lidarr_bridge.web.xml import build_error
 
 def create_app(
     config: Config,
-    gateway,
-    release_store,
-    job_store,
-    clock,
+    gateway: SoulseekGateway,
+    release_store: ReleaseStore,
+    job_store: JobStore,
+    clock: Clock,
 ) -> Flask:
     """Build and return the Flask application.
 
@@ -55,13 +63,10 @@ def create_app(
     newznab_bp = create_newznab_blueprint(
         search_service,
         release_store,
-        api_key=config.bridge_api_key,
         categories=config.categories,
     )
     sabnzbd_bp = create_sabnzbd_blueprint(
         download_service,
-        api_key=config.bridge_api_key,
-        categories=config.sab_categories,
         complete_dir=config.slskd_downloads_dir,
     )
 
@@ -69,11 +74,11 @@ def create_app(
     app.register_blueprint(sabnzbd_bp)
 
     @app.route("/health")
-    def health():
+    def health() -> ResponseReturnValue:
         return jsonify({"status": "ok"})
 
     @app.errorhandler(Exception)
-    def handle_exception(e: Exception):
+    def handle_exception(e: Exception) -> ResponseReturnValue:
         # Re-raise HTTP exceptions (404, 405, …) so Flask handles them normally.
         if isinstance(e, HTTPException):
             return e

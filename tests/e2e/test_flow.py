@@ -9,11 +9,12 @@ Drives the full flow:
   6. completed     – history shows slot with storage; queue empty
   7. delete        – history entry removed
 """
+
 from __future__ import annotations
 
 import io
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -124,9 +125,10 @@ class FakeGateway:
 # Fake Clock (no-op sleep so the search loop exits instantly)
 # ---------------------------------------------------------------------------
 
+
 class FakeClock:
     def now(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     def sleep(self, seconds: float) -> None:
         pass  # no-op
@@ -135,6 +137,7 @@ class FakeClock:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def downloads_dir(tmp_path):
@@ -168,6 +171,7 @@ def client(tmp_path, downloads_dir, gateway):
 # ---------------------------------------------------------------------------
 # The end-to-end test
 # ---------------------------------------------------------------------------
+
 
 def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     # ------------------------------------------------------------------
@@ -210,6 +214,7 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     # ------------------------------------------------------------------
     # The URL is absolute (http://localhost/indexer/nzb/<id>); extract the path.
     from urllib.parse import urlparse
+
     nzb_path = urlparse(nzb_url).path
     resp = client.get(nzb_path)
     assert resp.status_code == 200
@@ -265,9 +270,7 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     assert resp.status_code == 200
     h_data = resp.get_json()
     history_slots = h_data["history"]["slots"]
-    completed_slot = next(
-        (s for s in history_slots if s["nzo_id"] == nzo_id), None
-    )
+    completed_slot = next((s for s in history_slots if s["nzo_id"] == nzo_id), None)
     assert completed_slot is not None, (
         f"nzo_id {nzo_id!r} not found in history after completion: {history_slots}"
     )

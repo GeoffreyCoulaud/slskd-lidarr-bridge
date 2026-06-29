@@ -1,7 +1,8 @@
 """Tests for SystemClock adapter."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from slskd_lidarr_bridge.adapters.system_clock import SystemClock
@@ -12,7 +13,7 @@ def test_now_returns_aware_datetime():
     result = clock.now()
     assert isinstance(result, datetime)
     assert result.tzinfo is not None
-    assert result.tzinfo == timezone.utc
+    assert result.tzinfo == UTC
 
 
 def test_sleep_calls_time_sleep():

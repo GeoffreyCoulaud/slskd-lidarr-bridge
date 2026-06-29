@@ -1,18 +1,14 @@
-import pytest
-from slskd_lidarr_bridge.domain.models import (
-    AudioFile,
-    SearchResponse,
-    Transfer,
-    SearchQuery,
-    Release,
-    DownloadJob,
-    JobStatusView,
-    AUDIO_EXTENSIONS,
-)
-from datetime import datetime
+from typing import Any
 
+from slskd_lidarr_bridge.domain.models import (
+    AUDIO_EXTENSIONS,
+    AudioFile,
+    SearchQuery,
+    Transfer,
+)
 
 # ── AudioFile.album_folder ────────────────────────────────────────────────────
+
 
 def test_audio_file_album_folder_backslash():
     f = AudioFile(filename=r"@@a\Music\Artist\Album Name\01 - x.flac", size=100)
@@ -30,6 +26,7 @@ def test_audio_file_album_folder_at_root():
 
 
 # ── AudioFile.is_audio ────────────────────────────────────────────────────────
+
 
 def test_audio_file_is_audio_flac():
     f = AudioFile(filename="x.flac", size=100, extension=".flac")
@@ -54,8 +51,9 @@ def test_audio_file_is_audio_case_insensitive():
 
 # ── Transfer properties ───────────────────────────────────────────────────────
 
-def _transfer(**kwargs):
-    defaults = dict(
+
+def _transfer(**kwargs: Any) -> Transfer:
+    defaults: dict[str, Any] = dict(
         username="user",
         id="abc",
         filename="file.flac",
@@ -91,6 +89,7 @@ def test_transfer_in_progress():
 
 # ── SearchQuery ───────────────────────────────────────────────────────────────
 
+
 def test_search_query_artist_album_not_empty():
     q = SearchQuery(artist="A", album="B")
     assert q.is_empty is False
@@ -118,6 +117,18 @@ def test_search_query_artist_only():
 
 # ── AUDIO_EXTENSIONS ─────────────────────────────────────────────────────────
 
+
 def test_audio_extensions_contains_expected():
-    for ext in (".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".alac", ".wma", ".ape"):
+    for ext in (
+        ".flac",
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".ogg",
+        ".opus",
+        ".wav",
+        ".alac",
+        ".wma",
+        ".ape",
+    ):
         assert ext in AUDIO_EXTENSIONS

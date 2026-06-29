@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
+from typing import Any
 from uuid import uuid4
 
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, JobStatusView
@@ -24,7 +25,7 @@ class DownloadService:
         self._clock = clock
         self._downloads_dir = downloads_dir
 
-    def start(self, payload: dict, category: str) -> str:
+    def start(self, payload: dict[str, Any], category: str) -> str:
         """Enqueue files on slskd, persist a DownloadJob, return its nzo_id."""
         username: str = payload["username"]
         title: str = payload["title"]
@@ -32,8 +33,7 @@ class DownloadService:
         total_size: int = payload["total_size"]
 
         files = tuple(
-            AudioFile(filename=f["filename"], size=f["size"])
-            for f in payload["files"]
+            AudioFile(filename=f["filename"], size=f["size"]) for f in payload["files"]
         )
 
         self._gateway.enqueue(username, list(files))
@@ -76,7 +76,9 @@ class DownloadService:
                 if lp:
                     storage = str(PurePosixPath(lp).parent)
                 else:
-                    storage = compute_storage_path(self._downloads_dir, job.files[0].filename)
+                    storage = compute_storage_path(
+                        self._downloads_dir, job.files[0].filename
+                    )
             elif any(t.is_failed for t in matched):
                 state = "failed"
                 failed = next(t for t in matched if t.is_failed)

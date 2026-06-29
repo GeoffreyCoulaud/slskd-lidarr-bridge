@@ -1,4 +1,5 @@
 """Tests for the application entrypoint (Task 18)."""
+
 from __future__ import annotations
 
 import pytest

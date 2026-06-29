@@ -14,6 +14,8 @@ dependencies = [
 dev = [
     "pytest>=8",
     "respx>=0.21",
+    "ruff>=0.9",
+    "mypy>=1.13",
 ]
 
 [build-system]
@@ -26,3 +28,32 @@ packages = ["src/slskd_lidarr_bridge"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
+
+# Tests use fakes and pytest fixtures: don't force annotating every test
+# function or fake, but still type-check their bodies for real type errors
+# (None-safety, argument mismatches, …) against the typed production code.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+
+# Third-party packages without bundled type stubs.
+[[tool.mypy.overrides]]
+module = ["waitress.*", "respx.*"]
+ignore_missing_imports = true

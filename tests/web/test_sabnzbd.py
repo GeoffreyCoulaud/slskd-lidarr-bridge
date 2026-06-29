@@ -1,8 +1,8 @@
 """Tests for the SABnzbd download-client blueprint (Task 16)."""
+
 from __future__ import annotations
 
 import io
-from datetime import datetime, timezone
 
 import flask
 
@@ -58,20 +58,14 @@ def _make_status(
 
 def _make_app(
     download_service=None,
-    api_key=None,
-    categories=None,
     complete_dir: str = "/downloads",
 ) -> flask.Flask:
     if download_service is None:
         download_service = FakeDownloadService()
-    if categories is None:
-        categories = ["music"]
 
     app = flask.Flask(__name__)
     bp = create_sabnzbd_blueprint(
         download_service,
-        api_key=api_key,
-        categories=categories,
         complete_dir=complete_dir,
     )
     app.register_blueprint(bp)
@@ -109,12 +103,6 @@ class TestVersion:
         assert "version" in data
         assert data["version"] == "4.3.0"
 
-    def test_version_no_api_key_required(self):
-        client = _make_app(api_key="secret").test_client()
-        resp = client.get("/sabnzbd/api?mode=version")
-        assert resp.status_code == 200
-        assert "version" in resp.get_json()
-
 
 # ---------------------------------------------------------------------------
 # Tests: get_config
@@ -130,11 +118,10 @@ class TestGetConfig:
         assert data["config"]["misc"]["complete_dir"] == "/data/downloads"
 
     def test_get_config_has_categories(self):
-        client = _make_app(categories=["music", "movies"]).test_client()
+        client = _make_app().test_client()
         resp = client.get("/sabnzbd/api?mode=get_config")
         data = resp.get_json()
         assert "music" in data["config"]["categories"]
-        assert "movies" in data["config"]["categories"]
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +198,7 @@ class TestAddFile:
         assert payload["album_folder"] == "Album"
 
     def test_addfile_no_file_returns_status_false(self):
-        """POSTing addfile without a 'name' file field returns status:false (HTTP 200)."""
+        """addfile without a 'name' file field returns status:false (HTTP 200)."""
         client = _make_app().test_client()
         resp = client.post(
             "/sabnzbd/api",
@@ -401,43 +388,3 @@ class TestDelete:
         resp = client.get("/sabnzbd/api?mode=history&name=delete&value=nzo456")
         assert resp.status_code == 200
         assert "nzo456" in svc.removed
-
-
-# ---------------------------------------------------------------------------
-# Tests: API key
-# ---------------------------------------------------------------------------
-
-
-class TestApiKey:
-    def test_missing_key_on_queue_returns_error(self):
-        client = _make_app(api_key="secret").test_client()
-        resp = client.get("/sabnzbd/api?mode=queue")
-        data = resp.get_json()
-        assert data["status"] is False
-        assert "error" in data
-
-    def test_wrong_key_returns_error(self):
-        client = _make_app(api_key="secret").test_client()
-        resp = client.get("/sabnzbd/api?mode=queue&apikey=wrong")
-        data = resp.get_json()
-        assert data["status"] is False
-        assert "API Key" in data["error"]
-
-    def test_correct_key_passes_queue(self):
-        svc = FakeDownloadService()
-        client = _make_app(download_service=svc, api_key="secret").test_client()
-        resp = client.get("/sabnzbd/api?mode=queue&apikey=secret")
-        assert resp.status_code == 200
-        assert "queue" in resp.get_json()
-
-    def test_version_works_without_key(self):
-        client = _make_app(api_key="secret").test_client()
-        resp = client.get("/sabnzbd/api?mode=version")
-        assert resp.status_code == 200
-        assert "version" in resp.get_json()
-
-    def test_get_config_fails_without_key(self):
-        client = _make_app(api_key="secret").test_client()
-        resp = client.get("/sabnzbd/api?mode=get_config")
-        data = resp.get_json()
-        assert data["status"] is False

@@ -3,13 +3,25 @@ Tests confirming the four domain Protocols exist and are runtime_checkable.
 Each test builds a minimal in-test class that implements all required methods
 and verifies isinstance() matches against the Protocol.
 """
-import pytest
-from datetime import datetime
-from slskd_lidarr_bridge.domain.models import AudioFile, SearchResponse, Transfer, Release, DownloadJob
-from slskd_lidarr_bridge.domain.ports import SoulseekGateway, ReleaseStore, JobStore, Clock
 
+from datetime import datetime
+
+from slskd_lidarr_bridge.domain.models import (
+    AudioFile,
+    DownloadJob,
+    Release,
+    SearchResponse,
+    Transfer,
+)
+from slskd_lidarr_bridge.domain.ports import (
+    Clock,
+    JobStore,
+    ReleaseStore,
+    SoulseekGateway,
+)
 
 # ── SoulseekGateway ──────────────────────────────────────────────────────────
+
 
 class _StubSoulseekGateway:
     def start_search(self, text: str) -> str:
@@ -38,10 +50,12 @@ def test_soulseek_gateway_is_runtime_checkable():
 def test_soulseek_gateway_non_conforming_class_fails():
     class _Bad:
         pass
+
     assert not isinstance(_Bad(), SoulseekGateway)
 
 
 # ── ReleaseStore ─────────────────────────────────────────────────────────────
+
 
 class _StubReleaseStore:
     def put(self, release: Release) -> str:
@@ -61,10 +75,12 @@ def test_release_store_is_runtime_checkable():
 def test_release_store_non_conforming_fails():
     class _Bad:
         pass
+
     assert not isinstance(_Bad(), ReleaseStore)
 
 
 # ── JobStore ─────────────────────────────────────────────────────────────────
+
 
 class _StubJobStore:
     def add(self, job: DownloadJob) -> None:
@@ -87,10 +103,12 @@ def test_job_store_is_runtime_checkable():
 def test_job_store_non_conforming_fails():
     class _Bad:
         pass
+
     assert not isinstance(_Bad(), JobStore)
 
 
 # ── Clock ────────────────────────────────────────────────────────────────────
+
 
 class _StubClock:
     def now(self) -> datetime:
@@ -107,4 +125,5 @@ def test_clock_is_runtime_checkable():
 def test_clock_non_conforming_fails():
     class _Bad:
         pass
+
     assert not isinstance(_Bad(), Clock)

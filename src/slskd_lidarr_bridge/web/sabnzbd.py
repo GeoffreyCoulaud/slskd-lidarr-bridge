@@ -4,27 +4,28 @@ Exposes:
   GET|POST /sabnzbd/api   – dispatch on mode=version|get_config|fullstatus|
                             addfile|queue|history + delete sub-actions
 """
+
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
+from slskd_lidarr_bridge.domain.download_service import DownloadService
 from slskd_lidarr_bridge.web.nzb import parse_nzb
+
+# The bridge only ever handles music; the SABnzbd shim advertises a single,
+# fixed category to Lidarr.
+_CATEGORIES: list[str] = ["music"]
 
 
 def create_sabnzbd_blueprint(
-    download_service,
+    download_service: DownloadService,
     *,
-    api_key: str | None,
-    categories: list[str],
     complete_dir: str,
 ) -> Blueprint:
     """Build and return the SABnzbd shim Blueprint.
 
     Args:
         download_service: implements DownloadService with start/statuses/remove.
-        api_key: if set, any mode except ``version`` must supply a matching
-                 ``apikey`` query/form param.
-        categories: SABnzbd category names returned by get_config.
         complete_dir: download completion directory reported to Lidarr.
 
     Returns:
@@ -36,34 +37,19 @@ def create_sabnzbd_blueprint(
         """Read a parameter from query string or form body."""
         return request.args.get(name) or request.form.get(name) or None
 
-    def _api_key_error():
-        """Return an error dict if api_key is set and auth fails; else None."""
-        if api_key is None:
-            return None
-        provided = _get_param("apikey")
-        if provided != api_key:
-            return {"status": False, "error": "API Key Incorrect"}
-        return None
-
     @bp.route("/api", methods=["GET", "POST"])
-    def api():
+    def api() -> Response:
         mode = _get_param("mode") or ""
 
-        # version is exempt from api_key enforcement
         if mode == "version":
             return jsonify({"version": "4.3.0"})
-
-        # All other modes require a valid api_key (when configured)
-        err = _api_key_error()
-        if err is not None:
-            return jsonify(err)
 
         if mode == "get_config":
             return jsonify(
                 {
                     "config": {
                         "misc": {"complete_dir": complete_dir},
-                        "categories": categories,
+                        "categories": _CATEGORIES,
                     }
                 }
             )

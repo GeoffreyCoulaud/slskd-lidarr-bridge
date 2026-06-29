@@ -2,9 +2,7 @@
 
 import email.utils
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from slskd_lidarr_bridge.web.xml import build_caps, build_error, build_results_rss
 
@@ -50,6 +48,7 @@ def test_caps_audio_search_supported_params_contains_required():
     data = build_caps(CATEGORIES)
     root = ET.fromstring(data)
     audio_search = root.find("searching/audio-search")
+    assert audio_search is not None
     params = audio_search.get("supportedParams", "")
     param_list = [p.strip() for p in params.split(",")]
     for required in ("q", "artist", "album"):
@@ -68,6 +67,7 @@ def test_caps_search_supported_params_contains_q():
     data = build_caps(CATEGORIES)
     root = ET.fromstring(data)
     search = root.find("searching/search")
+    assert search is not None
     params = search.get("supportedParams", "")
     assert "q" in [p.strip() for p in params.split(",")]
 
@@ -94,10 +94,7 @@ def test_caps_all_categories_present():
     root = ET.fromstring(data)
     cats_el = root.find("categories")
     assert cats_el is not None
-    found = {
-        (int(c.get("id")), c.get("name"))
-        for c in cats_el.findall("category")
-    }
+    found = {(int(c.get("id", "")), c.get("name")) for c in cats_el.findall("category")}
     expected = {(cat_id, name) for cat_id, name in CATEGORIES}
     assert expected == found
 
@@ -106,7 +103,7 @@ def test_caps_all_categories_present():
 # build_results_rss
 # ---------------------------------------------------------------------------
 
-PUB_DATE = datetime(2024, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+PUB_DATE = datetime(2024, 3, 15, 12, 0, 0, tzinfo=UTC)
 
 ITEM = {
     "title": "Björk – Homogenic (1997) [FLAC]",

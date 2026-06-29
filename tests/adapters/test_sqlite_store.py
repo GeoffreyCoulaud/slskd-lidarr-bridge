@@ -1,14 +1,10 @@
 """Tests for SqliteReleaseStore + SqliteJobStore — typed wrappers over SqliteStore."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from slskd_lidarr_bridge.adapters.sqlite_store import (
-    SqliteJobStore,
-    SqliteReleaseStore,
-    SqliteStore,
     open_stores,
 )
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
@@ -18,8 +14,8 @@ from slskd_lidarr_bridge.domain.ports import JobStore, ReleaseStore
 # Helpers
 # ---------------------------------------------------------------------------
 
-DT_NOW = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-DT_OLD = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+DT_NOW = datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
+DT_OLD = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
 
 FILE1 = AudioFile(
     filename=r"@@peer\Music\Artist\Album\01.flac",
@@ -129,7 +125,7 @@ def test_release_purge_older_than(tmp_path):
     old_id = rs.put(make_release(created_at=DT_OLD))
     new_id = rs.put(make_release(created_at=DT_NOW))
 
-    cutoff = datetime(2024, 3, 1, tzinfo=timezone.utc)
+    cutoff = datetime(2024, 3, 1, tzinfo=UTC)
     rs.purge_older_than(cutoff)
 
     assert rs.get(old_id) is None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter
-from typing import Sequence
+from collections.abc import Sequence
 
 from slskd_lidarr_bridge.domain.models import AudioFile
 

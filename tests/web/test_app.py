@@ -1,8 +1,9 @@
 """Tests for the Flask app factory (Task 17)."""
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob
@@ -12,7 +13,7 @@ from slskd_lidarr_bridge.web.app import create_app
 # Fakes
 # ---------------------------------------------------------------------------
 
-CREATED_AT = datetime(2024, 1, 1, tzinfo=timezone.utc)
+CREATED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 class FakeGateway:
@@ -127,10 +128,7 @@ def _make_config(**overrides) -> Config:
         slskd_url="http://slskd:5030",
         slskd_api_key="key",
         slskd_downloads_dir="/downloads",
-        bridge_api_key=None,
         categories=[(3000, "Audio"), (3040, "Audio/Lossless")],
-        sab_categories=["music"],
-        bridge_host="0.0.0.0",
         bridge_port=8765,
         search_timeout=30,
         db_path=":memory:",
@@ -173,23 +171,6 @@ class TestCreateApp:
         assert resp.status_code == 200
         assert "version" in resp.get_json()
 
-    def test_api_key_wired_to_blueprints(self):
-        config = _make_config(bridge_api_key="mykey")
-        app = create_app(
-            config, FakeGateway(), FakeReleaseStore(), FakeJobStore(), FakeClock()
-        )
-        client = app.test_client()
-
-        # Indexer enforces key
-        resp = client.get("/indexer/api?t=caps")
-        root = ET.fromstring(resp.data)
-        assert root.tag == "error"
-        assert root.get("code") == "100"
-
-        # SABnzbd enforces key (queue mode)
-        resp = client.get("/sabnzbd/api?mode=queue")
-        assert resp.get_json()["status"] is False
-
 
 # ---------------------------------------------------------------------------
 # Tests: error handler — no stack trace leakage
@@ -218,13 +199,13 @@ class TestErrorHandlers:
         assert b"Traceback" not in resp.data
 
     def test_sabnzbd_service_error_returns_json_status_false(self):
-        """An exception from download_service.statuses() returns JSON status:false at HTTP 200."""
+        """An exception from statuses() returns JSON status:false at HTTP 200."""
         config = _make_config()
         app = create_app(
             config,
             ExplodingGateway(),  # transfers() raises
             FakeReleaseStore(),
-            FakeJobStoreWithOneJob(),  # list() returns one job so statuses() calls transfers()
+            FakeJobStoreWithOneJob(),  # one job → statuses() calls transfers()
             FakeClock(),
         )
         resp = app.test_client().get("/sabnzbd/api?mode=queue")

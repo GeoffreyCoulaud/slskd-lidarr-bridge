@@ -1,4 +1,5 @@
 """Tests for SlskdGateway — respx mocks httpx transport."""
+
 from __future__ import annotations
 
 import httpx
@@ -23,10 +24,13 @@ def make_gateway() -> tuple[SlskdGateway, httpx.Client]:
 # start_search
 # ---------------------------------------------------------------------------
 
+
 @respx.mock
 def test_start_search_posts_correct_body_and_header():
     route = respx.post(f"{BASE_URL}/api/v0/searches").mock(
-        return_value=httpx.Response(200, json={"id": "abc123", "searchText": "artist album"})
+        return_value=httpx.Response(
+            200, json={"id": "abc123", "searchText": "artist album"}
+        )
     )
     gw, _ = make_gateway()
     result = gw.start_search("artist album")
@@ -35,6 +39,7 @@ def test_start_search_posts_correct_body_and_header():
     assert route.called
     request = route.calls.last.request
     import json
+
     body = json.loads(request.content)
     assert body == {"searchText": "artist album"}
     assert request.headers["x-api-key"] == API_KEY
@@ -43,6 +48,7 @@ def test_start_search_posts_correct_body_and_header():
 # ---------------------------------------------------------------------------
 # search_is_complete
 # ---------------------------------------------------------------------------
+
 
 @respx.mock
 def test_search_is_complete_returns_bool():
@@ -68,8 +74,8 @@ def test_search_is_complete_false():
 # search_responses
 # ---------------------------------------------------------------------------
 
-# Extension field is unreliable: peer2's file has extension="" and "MP3" (wrong/unreliable)
-# but the filename carries the ground truth. We also include an extensionless filename.
+# Extension field is unreliable: peer2's file has extension="" / "MP3" (wrong),
+# but the filename carries the ground truth. Also includes an extensionless name.
 SEARCH_RESPONSES_PAYLOAD = [
     {
         "username": "peer1",
@@ -80,7 +86,7 @@ SEARCH_RESPONSES_PAYLOAD = [
             {
                 "filename": r"@@peer1\Music\Artist\Album\01 - Track.flac",
                 "size": 30000000,
-                "extension": "flac",   # field may be present but we derive from filename
+                "extension": "flac",  # field may be present but we derive from filename
                 "bitRate": 1000,
                 "length": 240,
             },
@@ -100,7 +106,7 @@ SEARCH_RESPONSES_PAYLOAD = [
         "queueLength": 3,
         "files": [
             {
-                # extension field is "" (empty/wrong), but filename ends .mp3 — must use filename
+                # extension is "" (wrong), but filename ends .mp3 — must use filename
                 "filename": r"@@peer2\Music\Artist\Album\01.mp3",
                 "size": 8000000,
                 "extension": "",
@@ -149,12 +155,12 @@ def test_search_responses_parses_responses():
     f1 = r1.files[0]
     assert f1.filename == r"@@peer1\Music\Artist\Album\01 - Track.flac"
     assert f1.size == 30000000
-    assert f1.extension == ".flac"   # derived from filename (lowercase, leading dot)
+    assert f1.extension == ".flac"  # derived from filename (lowercase, leading dot)
     assert f1.bitrate == 1000
     assert f1.length == 240
 
     f2 = r1.files[1]
-    assert f2.extension == ".flac"   # filename ends .FLAC → lowercased to .flac
+    assert f2.extension == ".flac"  # filename ends .FLAC → lowercased to .flac
 
     r2 = responses[1]
     assert len(r2.files) == 3
@@ -176,6 +182,7 @@ def test_search_responses_parses_responses():
 # enqueue
 # ---------------------------------------------------------------------------
 
+
 @respx.mock
 def test_enqueue_posts_file_list():
     username = "peer1"
@@ -184,13 +191,18 @@ def test_enqueue_posts_file_list():
     )
     gw, _ = make_gateway()
     files = [
-        AudioFile(filename=r"@@peer1\Music\file.flac", size=30000000, extension=".flac"),
-        AudioFile(filename=r"@@peer1\Music\file2.flac", size=25000000, extension=".flac"),
+        AudioFile(
+            filename=r"@@peer1\Music\file.flac", size=30000000, extension=".flac"
+        ),
+        AudioFile(
+            filename=r"@@peer1\Music\file2.flac", size=25000000, extension=".flac"
+        ),
     ]
     gw.enqueue(username, files)
 
     assert route.called
     import json
+
     request = route.calls.last.request
     body = json.loads(request.content)
     assert body == [
@@ -310,6 +322,7 @@ def test_transfers_returns_empty_list_on_404():
 # cancel
 # ---------------------------------------------------------------------------
 
+
 @respx.mock
 def test_cancel_issues_delete_with_remove_true():
     username = "peer1"
@@ -346,9 +359,7 @@ def test_search_is_complete_raises_on_404():
 @respx.mock
 def test_start_search_raises_on_500():
     """A 500 from slskd must propagate as httpx.HTTPStatusError."""
-    respx.post(f"{BASE_URL}/api/v0/searches").mock(
-        return_value=httpx.Response(500)
-    )
+    respx.post(f"{BASE_URL}/api/v0/searches").mock(return_value=httpx.Response(500))
     gw, _ = make_gateway()
     with pytest.raises(httpx.HTTPStatusError):
         gw.start_search("some query")

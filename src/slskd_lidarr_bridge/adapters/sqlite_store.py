@@ -1,4 +1,4 @@
-"""SQLite-backed store adapter — typed wrappers satisfy ReleaseStore and JobStore Protocols.
+"""SQLite-backed store adapter — typed wrappers satisfy the store Protocols.
 
 Public API
 ----------
@@ -12,12 +12,13 @@ Internal
 - ``SqliteStore`` holds the DB connection and both tables; not meant to be
   imported by application code directly.
 """
+
 from __future__ import annotations
 
 import json
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
@@ -81,7 +82,7 @@ def _parse_dt(s: str) -> datetime:
     """Parse an ISO-8601 string (UTC) into an aware datetime."""
     dt = datetime.fromisoformat(s)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 

@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import xml.etree.ElementTree as ET
+from typing import Any
 
 NZB_NS = "http://www.newzbin.com/DTD/2003/nzb"
 META_TYPE = "x-slskd-payload"
@@ -13,7 +14,7 @@ META_TYPE = "x-slskd-payload"
 ET.register_namespace("", NZB_NS)
 
 
-def build_nzb(payload: dict) -> bytes:
+def build_nzb(payload: dict[str, Any]) -> bytes:
     """Build a valid NZB 1.1 XML document carrying *payload* as base64-encoded JSON.
 
     The document structure:
@@ -24,7 +25,9 @@ def build_nzb(payload: dict) -> bytes:
           <file ...>...</file>   <!-- dummy so generic NZB parsers don't choke -->
         </nzb>
     """
-    encoded = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode()).decode()
+    encoded = base64.b64encode(
+        json.dumps(payload, ensure_ascii=False).encode()
+    ).decode()
 
     root = ET.Element(f"{{{NZB_NS}}}nzb")
 
@@ -51,7 +54,7 @@ def build_nzb(payload: dict) -> bytes:
     return buf.getvalue()
 
 
-def parse_nzb(data: bytes) -> dict:
+def parse_nzb(data: bytes) -> dict[str, Any]:
     """Parse a self-describing NZB document and return the embedded payload dict.
 
     Raises ValueError if the x-slskd-payload meta element is absent.
@@ -64,5 +67,6 @@ def parse_nzb(data: bytes) -> dict:
             encoded = elem.text
             if encoded is None:
                 raise ValueError("x-slskd-payload meta element is empty")
-            return json.loads(base64.b64decode(encoded).decode())
+            payload: dict[str, Any] = json.loads(base64.b64decode(encoded).decode())
+            return payload
     raise ValueError("No x-slskd-payload meta element found in NZB document")

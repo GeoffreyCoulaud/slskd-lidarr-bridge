@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Transfer
 from slskd_lidarr_bridge.domain.download_service import DownloadService
-
+from slskd_lidarr_bridge.domain.models import (
+    AudioFile,
+    DownloadJob,
+    SearchResponse,
+    Transfer,
+)
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -25,9 +29,14 @@ class FakeGateway:
         self.cancelled: list[tuple[str, str]] = []
 
     # Unused search methods — satisfy Protocol
-    def start_search(self, text: str) -> str: ...  # type: ignore[return]
-    def search_is_complete(self, search_id: str) -> bool: return True
-    def search_responses(self, search_id: str) -> list: return []
+    def start_search(self, text: str) -> str:
+        return ""
+
+    def search_is_complete(self, search_id: str) -> bool:
+        return True
+
+    def search_responses(self, search_id: str) -> list[SearchResponse]:
+        return []
 
     def enqueue(self, username: str, files: list[AudioFile]) -> None:
         self.enqueued.append((username, list(files)))
@@ -58,7 +67,7 @@ class FakeJobStore:
 
 class FakeClock:
     def __init__(self, start: datetime | None = None) -> None:
-        self._now = start or datetime(2024, 1, 1, tzinfo=timezone.utc)
+        self._now = start or datetime(2024, 1, 1, tzinfo=UTC)
 
     def now(self) -> datetime:
         return self._now
@@ -114,14 +123,18 @@ def make_transfer(
 
 
 def test_start_returns_nzo_id_with_correct_prefix():
-    service = DownloadService(FakeGateway(), FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        FakeGateway(), FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
     nzo_id = service.start(SAMPLE_PAYLOAD, "music")
     assert nzo_id.startswith("SABnzbd_nzo_")
 
 
 def test_start_enqueues_files_on_gateway():
     gateway = FakeGateway()
-    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
 
     service.start(SAMPLE_PAYLOAD, "music")
 
@@ -136,7 +149,9 @@ def test_start_enqueues_files_on_gateway():
 
 def test_start_persists_download_job():
     jobs = FakeJobStore()
-    service = DownloadService(FakeGateway(), jobs, FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        FakeGateway(), jobs, FakeClock(), downloads_dir="/downloads"
+    )
 
     nzo_id = service.start(SAMPLE_PAYLOAD, "music")
 
@@ -157,9 +172,11 @@ def test_start_persists_download_job():
 
 
 def test_statuses_no_transfers_yet_reports_job_total_size():
-    """When gateway returns no transfers, total_bytes == job.total_size and percent == 0."""
+    """No transfers from gateway → total_bytes == job.total_size and percent == 0."""
     gateway = FakeGateway(transfers_by_username={})
-    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -177,12 +194,22 @@ def test_statuses_downloading_half_done():
     gateway = FakeGateway(
         transfers_by_username={
             "alice": [
-                make_transfer(r"@@a\Artist\Album\01.flac", transfer_id="t1", bytes_transferred=5_000_000),
-                make_transfer(r"@@a\Artist\Album\02.flac", transfer_id="t2", bytes_transferred=5_000_000),
+                make_transfer(
+                    r"@@a\Artist\Album\01.flac",
+                    transfer_id="t1",
+                    bytes_transferred=5_000_000,
+                ),
+                make_transfer(
+                    r"@@a\Artist\Album\02.flac",
+                    transfer_id="t2",
+                    bytes_transferred=5_000_000,
+                ),
             ]
         }
     )
-    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -221,7 +248,9 @@ def test_statuses_completed_uses_compute_storage_path():
             ]
         }
     )
-    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -254,7 +283,9 @@ def test_statuses_completed_uses_local_path_parent_when_set():
             ]
         }
     )
-    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -296,7 +327,9 @@ def test_statuses_partial_match_is_downloading():
             ]
         }
     )
-    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
     service.start(payload_3, "music")
 
     views = service.statuses()
@@ -332,7 +365,9 @@ def test_statuses_failed_sets_fail_message():
             ]
         }
     )
-    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -350,7 +385,9 @@ def test_statuses_failed_sets_fail_message():
 
 
 def test_remove_cancels_in_progress_transfers_and_removes_job():
-    in_progress = make_transfer(r"@@a\Artist\Album\01.flac", transfer_id="t1", state="InProgress")
+    in_progress = make_transfer(
+        r"@@a\Artist\Album\01.flac", transfer_id="t1", state="InProgress"
+    )
     completed = make_transfer(
         r"@@a\Artist\Album\02.flac",
         transfer_id="t2",
@@ -373,7 +410,9 @@ def test_remove_cancels_in_progress_transfers_and_removes_job():
 
 def test_remove_unknown_id_is_noop():
     gateway = FakeGateway()
-    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(
+        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
+    )
 
     # Must not raise
     service.remove("SABnzbd_nzo_doesnotexist")

@@ -9,9 +9,6 @@ A lightweight bridge that exposes [slskd](https://github.com/slsknet/slskd) (a S
 | `SLSKD_URL` | yes | — | Base URL of the slskd instance (e.g. `http://slskd:5030`) |
 | `SLSKD_API_KEY` | yes | — | API key for slskd authentication |
 | `SLSKD_DOWNLOADS_DIR` | yes | — | Absolute path to slskd's downloads directory (must match Lidarr's view) |
-| `BRIDGE_API_KEY` | no | _(none)_ | When set, all bridge endpoints require this key as `apikey` |
-| `BRIDGE_CATEGORIES` | no | `music` | Comma-separated list of SABnzbd category names reported to Lidarr |
-| `BRIDGE_HOST` | no | `0.0.0.0` | Host address for the bridge HTTP server |
 | `BRIDGE_PORT` | no | `8765` | TCP port for the bridge HTTP server |
 | `SLSKD_SEARCH_TIMEOUT` | no | `30` | Seconds to wait for a slskd search to complete |
 | `BRIDGE_DB_PATH` | no | `/data/bridge.db` | Path to the SQLite database file |
@@ -41,7 +38,6 @@ services:
       SLSKD_URL: http://slskd:5030
       SLSKD_API_KEY: your-slskd-api-key
       SLSKD_DOWNLOADS_DIR: /downloads
-      # BRIDGE_API_KEY: your-bridge-key   # optional but recommended
     depends_on:
       - slskd
 
@@ -61,7 +57,7 @@ In Lidarr: **Settings → Indexers → Add → Newznab**
 | Name | slskd (or any label) |
 | URL | `http://bridge:8765/indexer` |
 | API Path | `/api` |
-| API Key | value of `BRIDGE_API_KEY` (leave blank if not set) |
+| API Key | _(leave blank — the bridge does not require one)_ |
 
 ### 2 — Add a SABnzbd download client
 
@@ -73,7 +69,7 @@ In Lidarr: **Settings → Download Clients → Add → SABnzbd**
 | Host | `bridge` |
 | Port | `8765` |
 | URL Base | `/sabnzbd` |
-| API Key | value of `BRIDGE_API_KEY` (leave blank if not set) |
+| API Key | _(leave blank — the bridge does not require one)_ |
 | Category | `music` |
 
 ### 3 — Shared downloads volume

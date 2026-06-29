@@ -58,8 +58,10 @@ class SearchService:
         for response in responses:
             # Keep only audio files, filtered by min_bitrate when set.
             audio: list[AudioFile] = [
-                f for f in response.files
-                if f.is_audio and (
+                f
+                for f in response.files
+                if f.is_audio
+                and (
                     self._min_bitrate is None
                     or f.bitrate is None
                     or f.bitrate >= self._min_bitrate
@@ -75,7 +77,11 @@ class SearchService:
 
             for folder, files in groups.items():
                 # Derive artist / album.
-                if query.term is not None and query.artist is None and query.album is None:
+                if (
+                    query.term is not None
+                    and query.artist is None
+                    and query.album is None
+                ):
                     # Term-only query: parse the folder name.
                     if " - " in folder:
                         left, right = folder.split(" - ", 1)
@@ -104,7 +110,9 @@ class SearchService:
                 )
                 release_id = self._store.put(release)
                 release = dataclasses.replace(release, id=release_id)
-                tagged.append((response.has_free_upload_slot, response.upload_speed, release))
+                tagged.append(
+                    (response.has_free_upload_slot, response.upload_speed, release)
+                )
 
         # Order by (free slot desc, upload speed desc).
         tagged.sort(key=lambda x: (x[0], x[1]), reverse=True)
