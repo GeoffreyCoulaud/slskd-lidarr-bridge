@@ -7,6 +7,7 @@ Uses stdlib only: xml.etree.ElementTree, email.utils, io.
 import email.utils
 import io
 import xml.etree.ElementTree as ET
+from datetime import timezone
 
 NEWZNAB_NS = "http://www.newznab.com/DTD/2010/feeds/attributes/"
 
@@ -87,6 +88,8 @@ def build_results_rss(
         <title>, <guid>, <pubDate> (RFC-822), <enclosure>, and
         <newznab:attr name="size"> + <newznab:attr name="category">.
 
+    Note: naive pubDate datetimes (tzinfo is None) are treated as UTC.
+
     Args:
         items: list of item dicts.
         channel_title: value of <channel><title>.
@@ -112,7 +115,10 @@ def build_results_rss(
         guid_el.text = item["guid"]
 
         pub = ET.SubElement(item_el, "pubDate")
-        pub.text = email.utils.format_datetime(item["pubDate"])
+        pub_date = item["pubDate"]
+        if pub_date.tzinfo is None:
+            pub_date = pub_date.replace(tzinfo=timezone.utc)
+        pub.text = email.utils.format_datetime(pub_date)
 
         enc = ET.SubElement(item_el, "enclosure")
         enc.set("url", item["link"])

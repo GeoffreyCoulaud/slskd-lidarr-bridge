@@ -3,6 +3,7 @@ that embed a base64-encoded JSON payload in the <head><meta> element.
 """
 
 import base64
+import io
 import json
 import xml.etree.ElementTree as ET
 
@@ -45,7 +46,6 @@ def build_nzb(payload: dict) -> bytes:
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
 
-    import io
     buf = io.BytesIO()
     tree.write(buf, xml_declaration=True, encoding="UTF-8")
     return buf.getvalue()
@@ -64,5 +64,5 @@ def parse_nzb(data: bytes) -> dict:
             encoded = elem.text
             if encoded is None:
                 raise ValueError("x-slskd-payload meta element is empty")
-            return json.loads(base64.b64decode(encoded.encode()).decode())
+            return json.loads(base64.b64decode(encoded).decode())
     raise ValueError("No x-slskd-payload meta element found in NZB document")

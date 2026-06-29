@@ -183,6 +183,22 @@ def test_rss_item_pubdate_is_rfc822_parseable():
     # email.utils.parsedate_to_datetime raises ValueError if not RFC-822
     parsed = email.utils.parsedate_to_datetime(pub.text)
     assert parsed is not None
+    # RFC-822 round-trip: parsed datetime must equal the original PUB_DATE
+    assert parsed == PUB_DATE
+
+
+def test_rss_item_pubdate_naive_datetime_treated_as_utc():
+    """Naive datetimes (tzinfo=None) must not raise; output is valid RFC-822."""
+    naive_date = datetime(2024, 3, 15, 12, 0, 0)  # no tzinfo
+    naive_item = {**ITEM, "pubDate": naive_date}
+    root = _parse_rss(build_results_rss([naive_item]))
+    pub = root.find("channel/item/pubDate")
+    assert pub is not None
+    # Must parse as RFC-822 without raising
+    parsed = email.utils.parsedate_to_datetime(pub.text)
+    assert parsed is not None
+    # Should be treated as UTC
+    assert parsed.tzinfo is not None
 
 
 def test_rss_item_newznab_size_attr():

@@ -111,19 +111,19 @@ class SlskdGateway:
         return results
 
     def enqueue(self, username: str, files: list[AudioFile]) -> None:
-        """POST /api/v0/downloads/{username} with [{filename, size}, ...]."""
+        """POST /api/v0/transfers/downloads/{username} with [{filename, size}, ...]."""
         payload = [{"filename": f.filename, "size": f.size} for f in files]
-        r = self._client.post(f"/api/v0/downloads/{username}", json=payload)
+        r = self._client.post(f"/api/v0/transfers/downloads/{username}", json=payload)
         r.raise_for_status()
 
     def transfers(self, username: str) -> list[Transfer]:
-        """GET /api/v0/downloads/{username} → flatten directories→files → list[Transfer].
+        """GET /api/v0/transfers/downloads/{username} → flatten directories→files → list[Transfer].
 
         slskd groups transfers by directory; we flatten all files.
         Note: slskd does not expose a local on-disk path in this payload,
         so local_path is always None.
         """
-        r = self._client.get(f"/api/v0/downloads/{username}")
+        r = self._client.get(f"/api/v0/transfers/downloads/{username}")
         if r.status_code == 404:
             return []
         r.raise_for_status()
@@ -147,9 +147,9 @@ class SlskdGateway:
         return result
 
     def cancel(self, username: str, transfer_id: str) -> None:
-        """DELETE /api/v0/downloads/{username}/{id}?remove=true."""
+        """DELETE /api/v0/transfers/downloads/{username}/{id}?remove=true."""
         r = self._client.delete(
-            f"/api/v0/downloads/{username}/{transfer_id}",
+            f"/api/v0/transfers/downloads/{username}/{transfer_id}",
             params={"remove": "true"},
         )
         r.raise_for_status()

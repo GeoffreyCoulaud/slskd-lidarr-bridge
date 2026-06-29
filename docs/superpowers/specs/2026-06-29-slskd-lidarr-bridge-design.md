@@ -34,13 +34,13 @@ uses a flat HTTP/JSON API, and matches Soulseek's "fire-and-forget, no seeding" 
     bitRate, bitDepth, sampleRate, length, ... } ] }`.
     `filename` is the full remote path with **backslash** separators.
 - Download:
-  - `POST /api/v0/downloads/{username}` body `[ { "filename": "<remote path>", "size": <bytes> } ]`.
+  - `POST /api/v0/transfers/downloads/{username}` body `[ { "filename": "<remote path>", "size": <bytes> } ]`.
     Does **not** return the new transfer id.
-  - `GET /api/v0/downloads/{username}` → user's transfers; match by `filename` to learn each `id`.
-  - `GET /api/v0/downloads/{username}/{id}` → `Transfer`: `state` (comma-joined flags),
+  - `GET /api/v0/transfers/downloads/{username}` → user's transfers; match by `filename` to learn each `id`.
+  - `GET /api/v0/transfers/downloads/{username}/{id}` → `Transfer`: `state` (comma-joined flags),
     `bytesTransferred`, `bytesRemaining`, `size`, `percentComplete`, `averageSpeed`, `exception`, ...
   - Done = `state` contains `Completed`; success = also contains `Succeeded`.
-  - Cancel/remove: `DELETE /api/v0/downloads/{username}/{id}?remove=true`.
+  - Cancel/remove: `DELETE /api/v0/transfers/downloads/{username}/{id}?remove=true`.
 - Completed files land under slskd's downloads directory, preserving the remote album subfolder.
 
 ### Lidarr → Newznab indexer

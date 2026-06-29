@@ -179,7 +179,7 @@ def test_search_responses_parses_responses():
 @respx.mock
 def test_enqueue_posts_file_list():
     username = "peer1"
-    route = respx.post(f"{BASE_URL}/api/v0/downloads/{username}").mock(
+    route = respx.post(f"{BASE_URL}/api/v0/transfers/downloads/{username}").mock(
         return_value=httpx.Response(201)
     )
     gw, _ = make_gateway()
@@ -263,7 +263,7 @@ TRANSFERS_PAYLOAD = {
 @respx.mock
 def test_transfers_flattens_directories():
     username = "peer1"
-    respx.get(f"{BASE_URL}/api/v0/downloads/{username}").mock(
+    respx.get(f"{BASE_URL}/api/v0/transfers/downloads/{username}").mock(
         return_value=httpx.Response(200, json=TRANSFERS_PAYLOAD)
     )
     gw, _ = make_gateway()
@@ -298,7 +298,7 @@ def test_transfers_flattens_directories():
 def test_transfers_returns_empty_list_on_404():
     """A 404 from slskd means no downloads for this user — return [], do not raise."""
     username = "peer-with-no-downloads"
-    respx.get(f"{BASE_URL}/api/v0/downloads/{username}").mock(
+    respx.get(f"{BASE_URL}/api/v0/transfers/downloads/{username}").mock(
         return_value=httpx.Response(404)
     )
     gw, _ = make_gateway()
@@ -315,7 +315,7 @@ def test_cancel_issues_delete_with_remove_true():
     username = "peer1"
     transfer_id = "transfer-id-1"
     route = respx.delete(
-        f"{BASE_URL}/api/v0/downloads/{username}/{transfer_id}",
+        f"{BASE_URL}/api/v0/transfers/downloads/{username}/{transfer_id}",
     ).mock(return_value=httpx.Response(204))
     gw, _ = make_gateway()
     gw.cancel(username, transfer_id)
