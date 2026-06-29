@@ -1,0 +1,56 @@
+name: Checks
+
+# Reusable workflow: lint, type-check, and test. Called by the PR workflow
+# and by the release workflow so both run the exact same quality gate.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v8
+        with:
+          # Pin uv to the version that resolved uv.lock (matches the Dockerfile)
+          version: "0.8.11"
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v8
+        with:
+          version: "0.8.11"
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Mypy
+        run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v8
+        with:
+          version: "0.8.11"
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      # pytest enforces 100% coverage via fail_under in pyproject.toml
+      - name: Pytest
+        run: uv run pytest
