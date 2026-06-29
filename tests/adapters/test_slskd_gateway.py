@@ -161,11 +161,13 @@ def test_enqueue_posts_file_list():
 
     assert route.called
     import json
-    body = json.loads(route.calls.last.request.content)
+    request = route.calls.last.request
+    body = json.loads(request.content)
     assert body == [
         {"filename": r"@@peer1\Music\file.flac", "size": 30000000},
         {"filename": r"@@peer1\Music\file2.flac", "size": 25000000},
     ]
+    assert request.headers["x-api-key"] == API_KEY
 
 
 # ---------------------------------------------------------------------------
@@ -270,3 +272,32 @@ def test_cancel_issues_delete_with_remove_true():
     assert route.called
     request = route.calls.last.request
     assert "remove=true" in str(request.url)
+    assert request.headers["x-api-key"] == API_KEY
+
+
+# ---------------------------------------------------------------------------
+# Negative-path: HTTP errors propagate as HTTPStatusError
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_search_is_complete_raises_on_404():
+    """A 404 from slskd must propagate as httpx.HTTPStatusError (not be swallowed)."""
+    search_id = "no-such-search"
+    respx.get(f"{BASE_URL}/api/v0/searches/{search_id}").mock(
+        return_value=httpx.Response(404)
+    )
+    gw, _ = make_gateway()
+    with pytest.raises(httpx.HTTPStatusError):
+        gw.search_is_complete(search_id)
+
+
+@respx.mock
+def test_start_search_raises_on_500():
+    """A 500 from slskd must propagate as httpx.HTTPStatusError."""
+    respx.post(f"{BASE_URL}/api/v0/searches").mock(
+        return_value=httpx.Response(500)
+    )
+    gw, _ = make_gateway()
+    with pytest.raises(httpx.HTTPStatusError):
+        gw.start_search("some query")

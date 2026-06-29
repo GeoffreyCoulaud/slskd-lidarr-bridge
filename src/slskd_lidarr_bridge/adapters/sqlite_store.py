@@ -1,4 +1,17 @@
-"""SQLite-backed store adapter — implements both ReleaseStore and JobStore."""
+"""SQLite-backed store adapter — typed wrappers satisfy ReleaseStore and JobStore Protocols.
+
+Public API
+----------
+- ``SqliteReleaseStore``  — implements ``ReleaseStore``
+- ``SqliteJobStore``      — implements ``JobStore``
+- ``open_stores(db_path) -> tuple[SqliteReleaseStore, SqliteJobStore]``
+  Build both typed wrappers sharing one underlying ``SqliteStore``.
+
+Internal
+--------
+- ``SqliteStore`` holds the DB connection and both tables; not meant to be
+  imported by application code directly.
+"""
 from __future__ import annotations
 
 import json
@@ -8,10 +21,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
-
-# Module-level write lock; shared across all SqliteStore instances so that
-# Flask+waitress (threaded) cannot corrupt concurrent writes.
-_WRITE_LOCK = threading.Lock()
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS releases (
@@ -77,28 +86,33 @@ def _parse_dt(s: str) -> datetime:
 
 
 class SqliteStore:
-    """Combined ReleaseStore + JobStore backed by SQLite.
+    """Internal DB adapter holding both tables.
 
-    Thread-safe for Flask+waitress: ``check_same_thread=False`` is set on
-    the connection, and all mutating operations are serialised with a
-    module-level lock.
+    Thread-safe for Flask+waitress: ``check_same_thread=False`` is set on the
+    connection, and all mutating operations are serialised with a *per-instance*
+    lock (avoids false cross-instance serialisation when multiple in-memory
+    databases are used, e.g. in tests).
+
+    Prefer the typed wrappers ``SqliteReleaseStore`` / ``SqliteJobStore`` or
+    the convenience factory ``open_stores`` over this class directly.
     """
 
     def __init__(self, db_path: str) -> None:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        with _WRITE_LOCK:
+        self._write_lock = threading.Lock()
+        with self._write_lock:
             self._conn.executescript(_DDL)
             self._conn.commit()
 
     # ------------------------------------------------------------------
-    # ReleaseStore
+    # Release table
     # ------------------------------------------------------------------
 
     def put(self, release: Release) -> str:
         """Persist a Release; returns the newly assigned 16-char hex id."""
         new_id = uuid4().hex[:16]
-        with _WRITE_LOCK:
+        with self._write_lock:
             self._conn.execute(
                 """
                 INSERT INTO releases
@@ -142,21 +156,9 @@ class SqliteStore:
             created_at=_parse_dt(row["created_at"]),
         )
 
-    def get(self, id_: str) -> Release | DownloadJob | None:  # type: ignore[override]
-        """Satisfy both ReleaseStore.get and JobStore.get.
-
-        Searches releases first (by release id), then jobs (by nzo_id).
-        In practice release IDs (uuid4 hex[:16]) and nzo_ids are distinct
-        namespaces so there is no ambiguity.
-        """
-        rel = self.get_release(id_)
-        if rel is not None:
-            return rel
-        return self.get_job(id_)
-
     def purge_older_than(self, cutoff: datetime) -> None:
         """Delete releases whose created_at is strictly before cutoff."""
-        with _WRITE_LOCK:
+        with self._write_lock:
             self._conn.execute(
                 "DELETE FROM releases WHERE created_at < ?",
                 (cutoff.isoformat(),),
@@ -164,11 +166,11 @@ class SqliteStore:
             self._conn.commit()
 
     # ------------------------------------------------------------------
-    # JobStore
+    # Job table
     # ------------------------------------------------------------------
 
     def add(self, job: DownloadJob) -> None:
-        with _WRITE_LOCK:
+        with self._write_lock:
             self._conn.execute(
                 """
                 INSERT INTO jobs
@@ -224,6 +226,63 @@ class SqliteStore:
         ]
 
     def remove(self, nzo_id: str) -> None:
-        with _WRITE_LOCK:
+        with self._write_lock:
             self._conn.execute("DELETE FROM jobs WHERE nzo_id = ?", (nzo_id,))
             self._conn.commit()
+
+
+class SqliteReleaseStore:
+    """``ReleaseStore`` Protocol implementation backed by a shared ``SqliteStore``.
+
+    Build via ``open_stores(db_path)`` to share a single SQLite connection with
+    ``SqliteJobStore``.
+    """
+
+    def __init__(self, store: SqliteStore) -> None:
+        self._store = store
+
+    def put(self, release: Release) -> str:
+        return self._store.put(release)
+
+    def get(self, release_id: str) -> Release | None:
+        return self._store.get_release(release_id)
+
+    def purge_older_than(self, cutoff: datetime) -> None:
+        self._store.purge_older_than(cutoff)
+
+
+class SqliteJobStore:
+    """``JobStore`` Protocol implementation backed by a shared ``SqliteStore``.
+
+    Build via ``open_stores(db_path)`` to share a single SQLite connection with
+    ``SqliteReleaseStore``.
+    """
+
+    def __init__(self, store: SqliteStore) -> None:
+        self._store = store
+
+    def add(self, job: DownloadJob) -> None:
+        self._store.add(job)
+
+    def get(self, nzo_id: str) -> DownloadJob | None:
+        return self._store.get_job(nzo_id)
+
+    def list(self) -> list[DownloadJob]:
+        return self._store.list()
+
+    def remove(self, nzo_id: str) -> None:
+        self._store.remove(nzo_id)
+
+
+def open_stores(db_path: str) -> tuple[SqliteReleaseStore, SqliteJobStore]:
+    """Build both typed wrappers sharing one ``SqliteStore`` (one DB connection).
+
+    Usage::
+
+        release_store, job_store = open_stores("/data/bridge.db")
+
+    Both wrappers share the same underlying connection and per-instance write
+    lock, so they are safe to use from multiple threads simultaneously.
+    """
+    store = SqliteStore(db_path)
+    return SqliteReleaseStore(store), SqliteJobStore(store)

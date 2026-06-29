@@ -1,12 +1,18 @@
-"""Tests for SqliteStore — ReleaseStore + JobStore over SQLite."""
+"""Tests for SqliteReleaseStore + SqliteJobStore — typed wrappers over SqliteStore."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 import pytest
 
-from slskd_lidarr_bridge.adapters.sqlite_store import SqliteStore
+from slskd_lidarr_bridge.adapters.sqlite_store import (
+    SqliteJobStore,
+    SqliteReleaseStore,
+    SqliteStore,
+    open_stores,
+)
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
+from slskd_lidarr_bridge.domain.ports import JobStore, ReleaseStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,19 +65,34 @@ def make_job() -> DownloadJob:
 
 
 # ---------------------------------------------------------------------------
+# Protocol conformance
+# ---------------------------------------------------------------------------
+
+
+def test_sqlite_release_store_satisfies_protocol(tmp_path):
+    rs, _ = open_stores(str(tmp_path / "db.sqlite"))
+    assert isinstance(rs, ReleaseStore)
+
+
+def test_sqlite_job_store_satisfies_protocol(tmp_path):
+    _, js = open_stores(str(tmp_path / "db.sqlite"))
+    assert isinstance(js, JobStore)
+
+
+# ---------------------------------------------------------------------------
 # ReleaseStore tests
 # ---------------------------------------------------------------------------
 
 
 def test_release_put_returns_id_and_get_roundtrips(tmp_path):
-    store = SqliteStore(str(tmp_path / "db.sqlite"))
+    rs, _ = open_stores(str(tmp_path / "db.sqlite"))
     rel = make_release()
-    rid = store.put(rel)
+    rid = rs.put(rel)
 
     assert isinstance(rid, str)
     assert len(rid) == 16
 
-    fetched = store.get(rid)
+    fetched = rs.get(rid)
     assert fetched is not None
     assert fetched.id == rid
     assert fetched.artist == rel.artist
@@ -91,40 +112,48 @@ def test_release_put_returns_id_and_get_roundtrips(tmp_path):
 
 
 def test_release_get_unknown_returns_none(tmp_path):
-    store = SqliteStore(str(tmp_path / "db.sqlite"))
-    assert store.get("doesnotexist") is None
+    rs, _ = open_stores(str(tmp_path / "db.sqlite"))
+    assert rs.get("doesnotexist") is None
+
+
+def test_release_get_does_not_return_jobs(tmp_path):
+    """SqliteReleaseStore.get must only look up releases, not jobs."""
+    rs, js = open_stores(str(tmp_path / "db.sqlite"))
+    js.add(make_job())
+    # nzo_id must NOT be found via the release store's get
+    assert rs.get("nzo-abc") is None
 
 
 def test_release_purge_older_than(tmp_path):
-    store = SqliteStore(str(tmp_path / "db.sqlite"))
-    old_id = store.put(make_release(created_at=DT_OLD))
-    new_id = store.put(make_release(created_at=DT_NOW))
+    rs, _ = open_stores(str(tmp_path / "db.sqlite"))
+    old_id = rs.put(make_release(created_at=DT_OLD))
+    new_id = rs.put(make_release(created_at=DT_NOW))
 
     cutoff = datetime(2024, 3, 1, tzinfo=timezone.utc)
-    store.purge_older_than(cutoff)
+    rs.purge_older_than(cutoff)
 
-    assert store.get(old_id) is None
-    assert store.get(new_id) is not None
+    assert rs.get(old_id) is None
+    assert rs.get(new_id) is not None
 
 
 def test_release_persists_across_reopen(tmp_path):
     db_path = str(tmp_path / "db.sqlite")
-    store1 = SqliteStore(db_path)
+    rs1, _ = open_stores(db_path)
     rel = make_release()
-    rid = store1.put(rel)
+    rid = rs1.put(rel)
 
-    # Open a NEW store on the same file — must see the row
-    store2 = SqliteStore(db_path)
-    fetched = store2.get(rid)
+    # Open NEW stores on the same file — must see the row.
+    rs2, _ = open_stores(db_path)
+    fetched = rs2.get(rid)
     assert fetched is not None
     assert fetched.artist == rel.artist
 
 
 def test_release_put_on_memory_db():
-    store = SqliteStore(":memory:")
+    rs, _ = open_stores(":memory:")
     rel = make_release()
-    rid = store.put(rel)
-    fetched = store.get(rid)
+    rid = rs.put(rel)
+    fetched = rs.get(rid)
     assert fetched is not None
     assert fetched.album == rel.album
 
@@ -135,11 +164,11 @@ def test_release_put_on_memory_db():
 
 
 def test_job_add_get_roundtrip(tmp_path):
-    store = SqliteStore(str(tmp_path / "db.sqlite"))
+    _, js = open_stores(str(tmp_path / "db.sqlite"))
     job = make_job()
-    store.add(job)
+    js.add(job)
 
-    fetched = store.get(job.nzo_id)
+    fetched = js.get(job.nzo_id)
     assert fetched is not None
     assert fetched.nzo_id == job.nzo_id
     assert fetched.title == job.title
@@ -153,12 +182,20 @@ def test_job_add_get_roundtrip(tmp_path):
 
 
 def test_job_get_unknown_returns_none(tmp_path):
-    store = SqliteStore(str(tmp_path / "db.sqlite"))
-    assert store.get("nzo-unknown") is None
+    _, js = open_stores(str(tmp_path / "db.sqlite"))
+    assert js.get("nzo-unknown") is None
+
+
+def test_job_get_does_not_return_releases(tmp_path):
+    """SqliteJobStore.get must only look up jobs, not releases."""
+    rs, js = open_stores(str(tmp_path / "db.sqlite"))
+    rid = rs.put(make_release())
+    # release id must NOT be found via the job store's get
+    assert js.get(rid) is None
 
 
 def test_job_list_returns_all(tmp_path):
-    store = SqliteStore(str(tmp_path / "db.sqlite"))
+    _, js = open_stores(str(tmp_path / "db.sqlite"))
     j1 = make_job()
     j2 = DownloadJob(
         nzo_id="nzo-def",
@@ -170,30 +207,33 @@ def test_job_list_returns_all(tmp_path):
         total_size=25_000_000,
         created_at=DT_NOW,
     )
-    store.add(j1)
-    store.add(j2)
+    js.add(j1)
+    js.add(j2)
 
-    jobs = store.list()
+    jobs = js.list()
     nzo_ids = {j.nzo_id for j in jobs}
     assert nzo_ids == {"nzo-abc", "nzo-def"}
 
 
 def test_job_remove(tmp_path):
-    store = SqliteStore(str(tmp_path / "db.sqlite"))
+    _, js = open_stores(str(tmp_path / "db.sqlite"))
     job = make_job()
-    store.add(job)
-    store.remove(job.nzo_id)
-    assert store.get(job.nzo_id) is None
+    js.add(job)
+    js.remove(job.nzo_id)
+    assert js.get(job.nzo_id) is None
 
 
 def test_job_remove_unknown_no_error(tmp_path):
-    store = SqliteStore(str(tmp_path / "db.sqlite"))
-    store.remove("nzo-unknown")  # must not raise
+    _, js = open_stores(str(tmp_path / "db.sqlite"))
+    js.remove("nzo-unknown")  # must not raise
 
 
 def test_job_persists_across_reopen(tmp_path):
     db_path = str(tmp_path / "db.sqlite")
-    SqliteStore(db_path).add(make_job())
-    fetched = SqliteStore(db_path).get("nzo-abc")
+    _, js1 = open_stores(db_path)
+    js1.add(make_job())
+
+    _, js2 = open_stores(db_path)
+    fetched = js2.get("nzo-abc")
     assert fetched is not None
     assert fetched.title == make_job().title
