@@ -24,3 +24,6 @@ build/
 .idea/
 .vscode/
 .DS_Store
+
+# SDD scratch (ledger, briefs, reports, diffs)
+.superpowers/
