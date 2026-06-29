@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from flask import Blueprint, Response, jsonify, request
 
+from slskd_lidarr_bridge.adapters.inbound.nzb import parse_nzb
 from slskd_lidarr_bridge.domain.download_service import DownloadService
-from slskd_lidarr_bridge.web.nzb import parse_nzb
 
 # The bridge only ever handles music; the SABnzbd shim advertises a single,
 # fixed category to Lidarr.

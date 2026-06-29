@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from slskd_lidarr_bridge.adapters.sqlite_store import (
+from slskd_lidarr_bridge.adapters.outbound.sqlite_store import (
     open_stores,
 )
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release

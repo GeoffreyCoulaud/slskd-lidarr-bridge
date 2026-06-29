@@ -6,9 +6,9 @@ import io
 
 import flask
 
+from slskd_lidarr_bridge.adapters.inbound.nzb import build_nzb
+from slskd_lidarr_bridge.adapters.inbound.sabnzbd import create_sabnzbd_blueprint
 from slskd_lidarr_bridge.domain.models import JobStatusView
-from slskd_lidarr_bridge.web.nzb import build_nzb
-from slskd_lidarr_bridge.web.sabnzbd import create_sabnzbd_blueprint
 
 # ---------------------------------------------------------------------------
 # Fakes

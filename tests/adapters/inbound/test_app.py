@@ -5,9 +5,9 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 
+from slskd_lidarr_bridge.adapters.inbound.app import create_app
 from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob
-from slskd_lidarr_bridge.web.app import create_app
 
 # ---------------------------------------------------------------------------
 # Fakes

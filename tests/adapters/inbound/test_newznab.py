@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 
 import flask
 
+from slskd_lidarr_bridge.adapters.inbound.newznab import create_newznab_blueprint
+from slskd_lidarr_bridge.adapters.inbound.nzb import parse_nzb
 from slskd_lidarr_bridge.domain.models import AudioFile, Release, SearchQuery
-from slskd_lidarr_bridge.web.newznab import create_newznab_blueprint
-from slskd_lidarr_bridge.web.nzb import parse_nzb
 
 # ---------------------------------------------------------------------------
 # Fakes

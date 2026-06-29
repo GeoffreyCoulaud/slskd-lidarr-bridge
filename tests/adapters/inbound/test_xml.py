@@ -4,7 +4,11 @@ import email.utils
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 
-from slskd_lidarr_bridge.web.xml import build_caps, build_error, build_results_rss
+from slskd_lidarr_bridge.adapters.inbound.xml import (
+    build_caps,
+    build_error,
+    build_results_rss,
+)
 
 NEWZNAB_NS = "http://www.newznab.com/DTD/2010/feeds/attributes/"
 

@@ -18,12 +18,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from slskd_lidarr_bridge.adapters.sqlite_store import open_stores
+from slskd_lidarr_bridge.adapters.inbound.app import create_app
+from slskd_lidarr_bridge.adapters.inbound.nzb import parse_nzb
+from slskd_lidarr_bridge.adapters.outbound.sqlite_store import open_stores
 from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.domain.models import AudioFile, SearchResponse, Transfer
 from slskd_lidarr_bridge.domain.paths import compute_storage_path
-from slskd_lidarr_bridge.web.app import create_app
-from slskd_lidarr_bridge.web.nzb import parse_nzb
 
 # ---------------------------------------------------------------------------
 # Fake SoulseekGateway

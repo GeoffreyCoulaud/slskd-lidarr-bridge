@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from slskd_lidarr_bridge.adapters.slskd_gateway import SlskdGateway
+from slskd_lidarr_bridge.adapters.outbound.slskd_gateway import SlskdGateway
 from slskd_lidarr_bridge.domain.models import AudioFile
 
 BASE_URL = "http://slskd:5030"

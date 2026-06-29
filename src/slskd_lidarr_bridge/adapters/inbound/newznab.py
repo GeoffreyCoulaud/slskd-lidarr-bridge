@@ -11,11 +11,15 @@ from typing import Any
 
 from flask import Blueprint, Response, abort, request, url_for
 
+from slskd_lidarr_bridge.adapters.inbound.nzb import build_nzb
+from slskd_lidarr_bridge.adapters.inbound.xml import (
+    build_caps,
+    build_error,
+    build_results_rss,
+)
 from slskd_lidarr_bridge.domain.models import Release, SearchQuery
 from slskd_lidarr_bridge.domain.ports import ReleaseStore
 from slskd_lidarr_bridge.domain.search_service import SearchService
-from slskd_lidarr_bridge.web.nzb import build_nzb
-from slskd_lidarr_bridge.web.xml import build_caps, build_error, build_results_rss
 
 # Newznab category IDs for audio quality tiers
 _LOSSLESS_QUALITY_PREFIXES = ("FLAC", "ALAC", "WAV")

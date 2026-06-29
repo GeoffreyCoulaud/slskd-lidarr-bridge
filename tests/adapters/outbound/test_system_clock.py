@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import patch
 
-from slskd_lidarr_bridge.adapters.system_clock import SystemClock
+from slskd_lidarr_bridge.adapters.outbound.system_clock import SystemClock
 
 
 def test_now_returns_aware_datetime():

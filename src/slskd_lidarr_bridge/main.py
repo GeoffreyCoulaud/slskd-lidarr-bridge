@@ -13,11 +13,11 @@ from collections.abc import Mapping
 
 from flask import Flask
 
-from slskd_lidarr_bridge.adapters.slskd_gateway import SlskdGateway
-from slskd_lidarr_bridge.adapters.sqlite_store import open_stores
-from slskd_lidarr_bridge.adapters.system_clock import SystemClock
+from slskd_lidarr_bridge.adapters.inbound.app import create_app
+from slskd_lidarr_bridge.adapters.outbound.slskd_gateway import SlskdGateway
+from slskd_lidarr_bridge.adapters.outbound.sqlite_store import open_stores
+from slskd_lidarr_bridge.adapters.outbound.system_clock import SystemClock
 from slskd_lidarr_bridge.config import Config
-from slskd_lidarr_bridge.web.app import create_app
 
 
 def build_app(env: Mapping[str, str]) -> Flask:

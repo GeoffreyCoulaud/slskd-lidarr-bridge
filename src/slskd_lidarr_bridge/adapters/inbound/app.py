@@ -11,6 +11,9 @@ from flask import Flask, jsonify, request
 from flask.typing import ResponseReturnValue
 from werkzeug.exceptions import HTTPException
 
+from slskd_lidarr_bridge.adapters.inbound.newznab import create_newznab_blueprint
+from slskd_lidarr_bridge.adapters.inbound.sabnzbd import create_sabnzbd_blueprint
+from slskd_lidarr_bridge.adapters.inbound.xml import build_error
 from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.domain.download_service import DownloadService
 from slskd_lidarr_bridge.domain.ports import (
@@ -20,9 +23,6 @@ from slskd_lidarr_bridge.domain.ports import (
     SoulseekGateway,
 )
 from slskd_lidarr_bridge.domain.search_service import SearchService
-from slskd_lidarr_bridge.web.newznab import create_newznab_blueprint
-from slskd_lidarr_bridge.web.sabnzbd import create_sabnzbd_blueprint
-from slskd_lidarr_bridge.web.xml import build_error
 
 
 def create_app(

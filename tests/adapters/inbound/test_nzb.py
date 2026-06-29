@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from slskd_lidarr_bridge.web.nzb import build_nzb, parse_nzb
+from slskd_lidarr_bridge.adapters.inbound.nzb import build_nzb, parse_nzb
 
 NZB_NS = "http://www.newzbin.com/DTD/2003/nzb"
 
