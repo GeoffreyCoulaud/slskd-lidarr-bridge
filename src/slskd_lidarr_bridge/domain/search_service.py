@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections import defaultdict
 
 from slskd_lidarr_bridge.domain.models import AudioFile, Release, SearchQuery
@@ -95,19 +96,7 @@ class SearchService:
                     created_at=created_at,
                 )
                 release_id = self._store.put(release)
-                # Frozen dataclass: rebuild with id set.
-                release = Release(
-                    artist=release.artist,
-                    album=release.album,
-                    title=release.title,
-                    username=release.username,
-                    files=release.files,
-                    size=release.size,
-                    album_folder=release.album_folder,
-                    quality=release.quality,
-                    created_at=release.created_at,
-                    id=release_id,
-                )
+                release = dataclasses.replace(release, id=release_id)
                 tagged.append((response.has_free_upload_slot, response.upload_speed, release))
 
         # Order by (free slot desc, upload speed desc).

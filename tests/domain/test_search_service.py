@@ -204,8 +204,8 @@ def test_timeout_stops_polling_without_infinite_loop():
 
     result = service.search(SearchQuery(artist="A", album="B"))
 
-    assert isinstance(result, list)
-    assert len(clock.sleeps) >= 1  # at least one sleep before timeout triggered
+    assert result == []
+    assert len(clock.sleeps) == 1  # exactly one sleep: elapsed hits timeout after first advance
 
 
 def test_ordering_free_slot_before_no_slot():
@@ -240,6 +240,27 @@ def test_min_bitrate_filters_low_bitrate_files():
     assert len(releases) == 1
     assert len(releases[0].files) == 1
     assert releases[0].files[0].bitrate == 320
+
+
+def test_min_bitrate_keeps_unknown_bitrate_files():
+    """Files with bitrate=None are kept when min_bitrate is set (conservative behavior)."""
+    unknown_bitrate = AudioFile(
+        filename=r"@@a\Artist\Album\01.flac",
+        size=10_000_000,
+        extension=".flac",
+        bitrate=None,
+    )
+    response = make_response("alice", [unknown_bitrate])
+    gateway = FakeGateway(completes_on=1, responses=[response])
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock, min_bitrate=192)
+
+    releases = service.search(SearchQuery(artist="A", album="B"))
+
+    assert len(releases) == 1
+    assert len(releases[0].files) == 1
+    assert releases[0].files[0].bitrate is None
 
 
 def test_non_audio_files_excluded():

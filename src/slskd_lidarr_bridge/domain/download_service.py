@@ -70,7 +70,7 @@ class DownloadService:
             storage: str | None = None
             fail_message: str | None = None
 
-            if matched and all(t.is_succeeded for t in matched):
+            if len(matched) == len(job.files) and all(t.is_succeeded for t in matched):
                 state = "completed"
                 lp = next((t.local_path for t in matched if t.local_path), None)
                 if lp:

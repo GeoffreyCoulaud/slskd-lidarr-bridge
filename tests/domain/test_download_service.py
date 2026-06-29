@@ -247,6 +247,49 @@ def test_statuses_completed_uses_local_path_parent_when_set():
     assert views[0].storage == "/actual/path/to/Album"
 
 
+def test_statuses_partial_match_is_downloading():
+    """3-file job where only 2 transfers are returned (both Succeeded) → downloading."""
+    payload_3: dict = {
+        "username": "alice",
+        "title": "Artist - Album [FLAC]",
+        "album_folder": "Album",
+        "total_size": 30_000_000,
+        "files": [
+            {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
+            {"filename": r"@@a\Artist\Album\02.flac", "size": 10_000_000},
+            {"filename": r"@@a\Artist\Album\03.flac", "size": 10_000_000},
+        ],
+    }
+    # Only 2 of 3 transfers returned, both succeeded
+    gateway = FakeGateway(
+        transfers_by_username={
+            "alice": [
+                make_transfer(
+                    r"@@a\Artist\Album\01.flac",
+                    transfer_id="t1",
+                    state="Completed, Succeeded",
+                    bytes_transferred=10_000_000,
+                ),
+                make_transfer(
+                    r"@@a\Artist\Album\02.flac",
+                    transfer_id="t2",
+                    state="Completed, Succeeded",
+                    bytes_transferred=10_000_000,
+                ),
+            ]
+        }
+    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service.start(payload_3, "music")
+
+    views = service.statuses()
+
+    assert len(views) == 1
+    v = views[0]
+    assert v.state == "downloading"
+    assert v.storage is None
+
+
 # ---------------------------------------------------------------------------
 # Tests — statuses: failed
 # ---------------------------------------------------------------------------
