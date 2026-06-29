@@ -44,11 +44,17 @@ def build_caps(categories: list[tuple[int, str]]) -> bytes:
     limits.set("max", "100")
     limits.set("default", "100")
 
-    search = ET.SubElement(root, "search")
+    searching = ET.SubElement(root, "searching")
+
+    search = ET.SubElement(searching, "search")
     search.set("available", "yes")
     search.set("supportedParams", "q")
 
-    audio_search = ET.SubElement(root, "audio-search")
+    tv_search = ET.SubElement(searching, "tv-search")
+    tv_search.set("available", "no")
+    tv_search.set("supportedParams", "q")
+
+    audio_search = ET.SubElement(searching, "audio-search")
     audio_search.set("available", "yes")
     audio_search.set("supportedParams", "q,artist,album")
 

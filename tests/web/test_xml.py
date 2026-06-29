@@ -25,10 +25,23 @@ def test_caps_root_tag():
     assert local == "caps"
 
 
+def test_caps_searching_element_exists():
+    data = build_caps(CATEGORIES)
+    root = ET.fromstring(data)
+    assert root.find("searching") is not None
+
+
+def test_caps_search_not_direct_child():
+    """Guards against regression to flat (un-nested) structure."""
+    data = build_caps(CATEGORIES)
+    root = ET.fromstring(data)
+    assert root.find("search") is None
+
+
 def test_caps_audio_search_available():
     data = build_caps(CATEGORIES)
     root = ET.fromstring(data)
-    audio_search = root.find("audio-search")
+    audio_search = root.find("searching/audio-search")
     assert audio_search is not None
     assert audio_search.get("available") == "yes"
 
@@ -36,7 +49,7 @@ def test_caps_audio_search_available():
 def test_caps_audio_search_supported_params_contains_required():
     data = build_caps(CATEGORIES)
     root = ET.fromstring(data)
-    audio_search = root.find("audio-search")
+    audio_search = root.find("searching/audio-search")
     params = audio_search.get("supportedParams", "")
     param_list = [p.strip() for p in params.split(",")]
     for required in ("q", "artist", "album"):
@@ -46,7 +59,7 @@ def test_caps_audio_search_supported_params_contains_required():
 def test_caps_search_available():
     data = build_caps(CATEGORIES)
     root = ET.fromstring(data)
-    search = root.find("search")
+    search = root.find("searching/search")
     assert search is not None
     assert search.get("available") == "yes"
 
@@ -54,9 +67,17 @@ def test_caps_search_available():
 def test_caps_search_supported_params_contains_q():
     data = build_caps(CATEGORIES)
     root = ET.fromstring(data)
-    search = root.find("search")
+    search = root.find("searching/search")
     params = search.get("supportedParams", "")
     assert "q" in [p.strip() for p in params.split(",")]
+
+
+def test_caps_tv_search_not_available():
+    data = build_caps(CATEGORIES)
+    root = ET.fromstring(data)
+    tv_search = root.find("searching/tv-search")
+    assert tv_search is not None
+    assert tv_search.get("available") == "no"
 
 
 def test_caps_limits():
