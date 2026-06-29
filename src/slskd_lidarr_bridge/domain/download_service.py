@@ -62,7 +62,7 @@ class DownloadService:
             job_filenames = {f.filename for f in job.files}
             matched = [t for t in all_transfers if t.filename in job_filenames]
 
-            total_bytes = sum(t.size for t in matched)
+            total_bytes = job.total_size
             transferred_bytes = sum(t.bytes_transferred for t in matched)
             percent = (transferred_bytes / total_bytes * 100) if total_bytes else 0.0
 

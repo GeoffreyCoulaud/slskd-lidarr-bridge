@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime
 from collections import defaultdict
 
 from slskd_lidarr_bridge.domain.models import AudioFile, Release, SearchQuery
@@ -21,6 +22,7 @@ class SearchService:
         search_timeout: int = 30,
         poll_interval: float = 1.0,
         min_bitrate: int | None = None,
+        release_ttl_days: int = 7,
     ) -> None:
         self._gateway = gateway
         self._store = store
@@ -28,10 +30,15 @@ class SearchService:
         self._search_timeout = search_timeout
         self._poll_interval = poll_interval
         self._min_bitrate = min_bitrate
+        self._release_ttl_days = release_ttl_days
 
     def search(self, query: SearchQuery) -> list[Release]:
         if query.is_empty:
             return []
+
+        self._store.purge_older_than(
+            self._clock.now() - datetime.timedelta(days=self._release_ttl_days)
+        )
 
         sid = self._gateway.start_search(query.to_search_text())
 

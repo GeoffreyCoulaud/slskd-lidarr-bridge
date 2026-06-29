@@ -13,7 +13,7 @@ class TestBuildApp:
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
             "SLSKD_DOWNLOADS_DIR": "/downloads",
-            "DB_PATH": db_path,
+            "BRIDGE_DB_PATH": db_path,
         }
         app = build_app(env)
         client = app.test_client()
@@ -27,7 +27,7 @@ class TestBuildApp:
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
             "SLSKD_DOWNLOADS_DIR": "/downloads",
-            "DB_PATH": db_path,
+            "BRIDGE_DB_PATH": db_path,
         }
         app = build_app(env)
         client = app.test_client()
@@ -41,7 +41,7 @@ class TestBuildApp:
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
             "SLSKD_DOWNLOADS_DIR": "/downloads",
-            "DB_PATH": db_path,
+            "BRIDGE_DB_PATH": db_path,
         }
         app = build_app(env)
         client = app.test_client()

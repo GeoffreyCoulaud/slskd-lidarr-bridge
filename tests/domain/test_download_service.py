@@ -156,6 +156,23 @@ def test_start_persists_download_job():
 # ---------------------------------------------------------------------------
 
 
+def test_statuses_no_transfers_yet_reports_job_total_size():
+    """When gateway returns no transfers, total_bytes == job.total_size and percent == 0."""
+    gateway = FakeGateway(transfers_by_username={})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads")
+    service.start(SAMPLE_PAYLOAD, "music")
+
+    views = service.statuses()
+
+    assert len(views) == 1
+    v = views[0]
+    assert v.state == "downloading"
+    assert v.total_bytes == 20_000_000
+    assert v.transferred_bytes == 0
+    assert v.percent == pytest.approx(0.0)
+    assert v.storage is None
+
+
 def test_statuses_downloading_half_done():
     gateway = FakeGateway(
         transfers_by_username={

@@ -25,7 +25,7 @@ RUN mkdir -p /data
 
 EXPOSE 8765
 
-# Default database path; override with DB_PATH if desired
-ENV DB_PATH=/data/bridge.db
+# Default database path; override with BRIDGE_DB_PATH if desired
+ENV BRIDGE_DB_PATH=/data/bridge.db
 
 CMD ["/app/.venv/bin/python", "-m", "slskd_lidarr_bridge.main"]

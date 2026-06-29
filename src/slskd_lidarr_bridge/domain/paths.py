@@ -21,6 +21,14 @@ def compute_storage_path(downloads_dir: str, remote_filename: str) -> str:
     Returns:
         Absolute local path to the album folder, e.g.
         ``"/downloads/Album Name"``.
+
+    Note — multi-disc albums:
+        Storage is derived from the file's *immediate* parent folder.
+        Multi-disc albums laid out as ``…/Album/CD1/track.flac`` will
+        report ``CD1`` (per-disc subfolder) rather than the album root —
+        this is the folder slskd actually wrote to, which is acceptable
+        for single-disc sets.  Lidarr import of multi-disc releases may
+        need the album root; revisit this logic if that becomes an issue.
     """
     # Normalize Windows-style separators so PurePosixPath handles both.
     normalized_remote = remote_filename.replace("\\", "/")

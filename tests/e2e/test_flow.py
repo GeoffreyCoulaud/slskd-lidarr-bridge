@@ -20,6 +20,7 @@ import pytest
 from slskd_lidarr_bridge.adapters.sqlite_store import open_stores
 from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.domain.models import AudioFile, SearchResponse, Transfer
+from slskd_lidarr_bridge.domain.paths import compute_storage_path
 from slskd_lidarr_bridge.web.app import create_app
 from slskd_lidarr_bridge.web.nzb import parse_nzb
 
@@ -272,6 +273,10 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     )
     assert completed_slot["status"] == "Completed"
     assert completed_slot["storage"], "storage path must be non-empty when completed"
+    expected_storage = compute_storage_path(downloads_dir, _FILES[0].filename)
+    assert completed_slot["storage"] == expected_storage, (
+        f"storage {completed_slot['storage']!r} != expected {expected_storage!r}"
+    )
 
     resp = client.get("/sabnzbd/api?mode=queue")
     assert resp.status_code == 200

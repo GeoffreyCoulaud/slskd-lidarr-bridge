@@ -23,9 +23,9 @@ def test_full_env_parses_all_fields():
         "BRIDGE_API_KEY": "bridge-key",
         "BRIDGE_HOST": "127.0.0.1",
         "BRIDGE_PORT": "9000",
-        "SEARCH_TIMEOUT": "60",
-        "DB_PATH": "/tmp/test.db",
-        "MIN_BITRATE": "192",
+        "SLSKD_SEARCH_TIMEOUT": "60",
+        "BRIDGE_DB_PATH": "/tmp/test.db",
+        "BRIDGE_MIN_BITRATE": "192",
         "BRIDGE_CATEGORIES": "music, podcasts",
     }
     cfg = Config.from_env(env)

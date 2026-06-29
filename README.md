@@ -13,9 +13,9 @@ A lightweight bridge that exposes [slskd](https://github.com/slsknet/slskd) (a S
 | `BRIDGE_CATEGORIES` | no | `music` | Comma-separated list of SABnzbd category names reported to Lidarr |
 | `BRIDGE_HOST` | no | `0.0.0.0` | Host address for the bridge HTTP server |
 | `BRIDGE_PORT` | no | `8765` | TCP port for the bridge HTTP server |
-| `SEARCH_TIMEOUT` | no | `30` | Seconds to wait for a slskd search to complete |
-| `DB_PATH` | no | `/data/bridge.db` | Path to the SQLite database file |
-| `MIN_BITRATE` | no | _(none)_ | Minimum acceptable bitrate in kbps; results below this are filtered out |
+| `SLSKD_SEARCH_TIMEOUT` | no | `30` | Seconds to wait for a slskd search to complete |
+| `BRIDGE_DB_PATH` | no | `/data/bridge.db` | Path to the SQLite database file |
+| `BRIDGE_MIN_BITRATE` | no | _(none)_ | Minimum acceptable bitrate in kbps; results below this are filtered out |
 
 ## Docker Compose
 
@@ -79,3 +79,8 @@ In Lidarr: **Settings → Download Clients → Add → SABnzbd**
 ### 3 — Shared downloads volume
 
 `SLSKD_DOWNLOADS_DIR` must be the **same filesystem path** that Lidarr uses when it inspects completed downloads. If Lidarr and the bridge run on different mounts (e.g. Lidarr sees `/media/music/downloads` but the bridge sees `/downloads`), configure a **Remote Path Mapping** in Lidarr under **Settings → Download Clients → Remote Path Mappings** to translate between the two paths.
+
+## Limitations
+
+- **Multi-disc albums:** The bridge derives the storage path from the immediate parent folder of each downloaded file. Multi-disc albums organised as `…/Album/CD1/track.flac` will report the per-disc subfolder (`CD1`) as the storage location rather than the album root. Lidarr import of multi-disc sets may fail to find all discs; use a Remote Path Mapping or wait for a future fix.
+- **Shared volume required:** `SLSKD_DOWNLOADS_DIR` must be the path that Lidarr also sees (direct shared volume or a Remote Path Mapping configured in Lidarr). Mismatched paths will cause Lidarr to fail to import completed downloads.

@@ -81,7 +81,7 @@ class Config:
         else:
             sab_categories = list(_DEFAULT_SAB_CATEGORIES)
 
-        raw_min_bitrate = env.get("MIN_BITRATE", "")
+        raw_min_bitrate = env.get("BRIDGE_MIN_BITRATE", "")
         min_bitrate = int(raw_min_bitrate) if raw_min_bitrate.strip() else None
 
         return cls(
@@ -93,7 +93,7 @@ class Config:
             sab_categories=sab_categories,
             bridge_host=env.get("BRIDGE_HOST", "0.0.0.0"),
             bridge_port=int(env.get("BRIDGE_PORT", "8765")),
-            search_timeout=int(env.get("SEARCH_TIMEOUT", "30")),
-            db_path=env.get("DB_PATH", "/data/bridge.db"),
+            search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "30")),
+            db_path=env.get("BRIDGE_DB_PATH", "/data/bridge.db"),
             min_bitrate=min_bitrate,
         )

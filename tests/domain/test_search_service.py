@@ -74,6 +74,17 @@ class FakeStore:
         pass
 
 
+class FakeStorePurge(FakeStore):
+    """FakeStore that records purge_older_than calls for assertion."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.purge_calls: list[datetime] = []
+
+    def purge_older_than(self, cutoff: datetime) -> None:
+        self.purge_calls.append(cutoff)
+
+
 class FakeClock:
     """Clock that records sleeps and advances now() by advance_per_sleep on each sleep."""
 
@@ -319,3 +330,38 @@ def test_term_only_no_dash_uses_folder_as_album():
     r = releases[0]
     assert r.artist == ""
     assert r.album == "RandomAlbum"
+
+
+# ---------------------------------------------------------------------------
+# Tests — release retention (purge_older_than)
+# ---------------------------------------------------------------------------
+
+
+def test_real_search_triggers_purge_with_correct_cutoff():
+    """A non-empty search calls purge_older_than with cutoff = now - ttl_days."""
+    files = [make_flac("Album", 1)]
+    response = make_response("alice", files)
+    gateway = FakeGateway(completes_on=1, responses=[response])
+    store = FakeStorePurge()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock, release_ttl_days=7)
+
+    service.search(SearchQuery(artist="A", album="B"))
+
+    assert len(store.purge_calls) == 1
+    expected_cutoff = clock.now() - timedelta(days=7)
+    assert store.purge_calls[0] == expected_cutoff
+
+
+def test_empty_query_does_not_purge_and_no_gateway_call():
+    """An empty query returns early before purging or touching the gateway."""
+    gateway = FakeGateway()
+    store = FakeStorePurge()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock, release_ttl_days=7)
+
+    result = service.search(SearchQuery())
+
+    assert result == []
+    assert gateway.started_searches == []
+    assert store.purge_calls == []
