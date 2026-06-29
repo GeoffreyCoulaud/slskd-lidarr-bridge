@@ -48,3 +48,9 @@ def test_root_level_file_raises() -> None:
 
     with pytest.raises(ValueError, match="remote_filename has no album folder"):
         compute_storage_path("/downloads", "01.flac")
+
+
+def test_root_downloads_dir_stays_absolute() -> None:
+    # "/" stripped → "" which would yield a relative path; guard keeps it "/"
+    result = compute_storage_path("/", r"x\Album\track.flac")
+    assert result == "/Album"
