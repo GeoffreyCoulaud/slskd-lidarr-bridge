@@ -19,6 +19,7 @@ import json
 import sqlite3
 import threading
 from datetime import UTC, datetime
+from types import TracebackType
 from uuid import uuid4
 
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
@@ -105,6 +106,30 @@ class SqliteStore:
         with self._write_lock:
             self._conn.executescript(_DDL)
             self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Close the underlying SQLite connection.
+
+        Idempotent: closing an already-closed connection is a no-op, so this
+        is safe to call from shutdown handlers or test teardown. After closing,
+        any store operation raises ``sqlite3.ProgrammingError``.
+        """
+        self._conn.close()
+
+    def __enter__(self) -> SqliteStore:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
     # ------------------------------------------------------------------
     # Release table
@@ -251,6 +276,10 @@ class SqliteReleaseStore:
     def purge_older_than(self, cutoff: datetime) -> None:
         self._store.purge_older_than(cutoff)
 
+    def close(self) -> None:
+        """Close the shared SQLite connection (also closes the paired job store)."""
+        self._store.close()
+
 
 class SqliteJobStore:
     """``JobStore`` Protocol implementation backed by a shared ``SqliteStore``.
@@ -273,6 +302,10 @@ class SqliteJobStore:
 
     def remove(self, nzo_id: str) -> None:
         self._store.remove(nzo_id)
+
+    def close(self) -> None:
+        """Close the shared SQLite connection (also closes the paired release store)."""
+        self._store.close()
 
 
 def open_stores(db_path: str) -> tuple[SqliteReleaseStore, SqliteJobStore]:

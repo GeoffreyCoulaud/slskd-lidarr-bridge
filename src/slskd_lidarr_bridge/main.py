@@ -47,6 +47,9 @@ def build_app(env: Mapping[str, str]) -> Flask:
     clock = SystemClock()
     app = create_app(config, gateway, release_store, job_store, clock)
     app.config["BRIDGE_CONFIG"] = config
+    # Keep a handle on the store so the server can release the shared SQLite
+    # connection at shutdown (see main()); the two wrappers share one connection.
+    app.config["BRIDGE_STORE"] = release_store
     return app
 
 
@@ -64,7 +67,11 @@ def main() -> None:
     )
     # Bind on all interfaces: the bridge runs in a container, reachable only
     # via the Docker network / published port.
-    waitress.serve(app, host="0.0.0.0", port=config.bridge_port)
+    try:
+        waitress.serve(app, host="0.0.0.0", port=config.bridge_port)
+    finally:
+        # Release the SQLite connection on shutdown so it isn't left dangling.
+        app.config["BRIDGE_STORE"].close()
 
 
 if __name__ == "__main__":

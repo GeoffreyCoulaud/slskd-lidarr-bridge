@@ -169,6 +169,7 @@ def client(tmp_path, downloads_dir, gateway):
     app.config["TESTING"] = True
     with app.test_client() as c:
         yield c
+    release_store.close()  # release the shared SQLite connection
 
 
 # ---------------------------------------------------------------------------

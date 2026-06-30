@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import runpy
+import sqlite3
 
 import pytest
 import waitress
@@ -25,6 +26,7 @@ class TestBuildApp:
         resp = client.get("/health")
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "ok"
+        app.config["BRIDGE_STORE"].close()
 
     def test_build_app_wires_indexer(self, tmp_path):
         db_path = str(tmp_path / "bridge.db")
@@ -38,6 +40,7 @@ class TestBuildApp:
         resp = client.get("/indexer/api?t=caps")
         assert resp.status_code == 200
         assert "xml" in resp.content_type
+        app.config["BRIDGE_STORE"].close()
 
     def test_build_app_wires_sabnzbd(self, tmp_path):
         db_path = str(tmp_path / "bridge.db")
@@ -51,6 +54,7 @@ class TestBuildApp:
         resp = client.get("/sabnzbd/api?mode=version")
         assert resp.status_code == 200
         assert "version" in resp.get_json()
+        app.config["BRIDGE_STORE"].close()
 
     def test_build_app_raises_on_missing_env(self):
         with pytest.raises(ValueError, match="SLSKD_URL"):
@@ -102,6 +106,19 @@ class TestMain:
 
         assert len(calls) == 1
         assert calls[0][1]["port"] == 8123
+
+    def test_main_closes_store_on_shutdown(self, monkeypatch, tmp_path):
+        """When ``serve`` returns (shutdown), main() releases the DB connection."""
+        self._set_env(monkeypatch, tmp_path)
+        calls: list[Flask] = []
+        monkeypatch.setattr(waitress, "serve", lambda app, **kw: calls.append(app))
+
+        main_module.main()
+
+        served_app = calls[0]
+        store = served_app.config["BRIDGE_STORE"]
+        with pytest.raises(sqlite3.ProgrammingError):
+            store.get("anything")  # connection closed → operating on it raises
 
 
 class TestLoggingSetup:
