@@ -48,6 +48,16 @@ def create_sabnzbd_blueprint(
         """Read a parameter from query string or form body."""
         return request.args.get(name) or request.form.get(name) or None
 
+    def _handle_delete() -> Response:
+        """Handle the name=delete sub-action for queue and history modes."""
+        value = request.args.get("value", "")
+        download_service.remove(value)
+        return jsonify({"status": True})
+
+    def _get_cat_filter() -> str | None:
+        """Read the optional category filter from query params (category= or cat=)."""
+        return request.args.get("category") or request.args.get("cat") or None
+
     @bp.route("/api", methods=["GET", "POST"])
     def api() -> Response:
         mode = _get_param("mode") or ""
@@ -83,13 +93,10 @@ def create_sabnzbd_blueprint(
             return jsonify({"status": True, "nzo_ids": [nzo_id]})
 
         if mode == "queue":
-            name_param = request.args.get("name")
-            if name_param == "delete":
-                value = request.args.get("value", "")
-                download_service.remove(value)
-                return jsonify({"status": True})
+            if request.args.get("name") == "delete":
+                return _handle_delete()
 
-            cat_filter = request.args.get("category") or request.args.get("cat")
+            cat_filter = _get_cat_filter()
             all_statuses = download_service.statuses()
             slots = []
             slot_index = 0
@@ -117,13 +124,10 @@ def create_sabnzbd_blueprint(
             return jsonify({"queue": {"slots": slots, "paused": False, "speed": "0"}})
 
         if mode == "history":
-            name_param = request.args.get("name")
-            if name_param == "delete":
-                value = request.args.get("value", "")
-                download_service.remove(value)
-                return jsonify({"status": True})
+            if request.args.get("name") == "delete":
+                return _handle_delete()
 
-            cat_filter = request.args.get("category") or request.args.get("cat")
+            cat_filter = _get_cat_filter()
             all_statuses = download_service.statuses()
             slots = []
             for s in all_statuses:
