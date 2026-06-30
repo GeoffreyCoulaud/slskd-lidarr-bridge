@@ -25,6 +25,25 @@ def test_audio_file_album_folder_at_root():
     assert f.album_folder == ""
 
 
+# ── AudioFile.artist_folder ───────────────────────────────────────────────────
+
+
+def test_audio_file_artist_folder_backslash():
+    f = AudioFile(filename=r"@@a\Music\Artist Name\Album\01 - x.flac", size=100)
+    assert f.artist_folder == "Artist Name"
+
+
+def test_audio_file_artist_folder_forward_slash():
+    f = AudioFile(filename="Artist Name/Album/01 - x.flac", size=100)
+    assert f.artist_folder == "Artist Name"
+
+
+def test_audio_file_artist_folder_too_flat():
+    # Only an album folder above the file → no grandparent → empty.
+    f = AudioFile(filename="Album/track.flac", size=100)
+    assert f.artist_folder == ""
+
+
 # ── AudioFile.is_audio ────────────────────────────────────────────────────────
 
 

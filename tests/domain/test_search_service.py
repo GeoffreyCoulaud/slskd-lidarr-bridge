@@ -164,7 +164,8 @@ def test_one_response_flac_album_one_folder():
     assert len(releases) == 1
     r = releases[0]
     assert r.username == "alice"
-    assert r.artist == "My Artist"
+    # Artist comes from the real folder layout (grandparent), not the query.
+    assert r.artist == "Artist"
     assert r.album == "My Album"
     assert r.quality == "FLAC"
     assert r.size == sum(f.size for f in files)
@@ -174,12 +175,12 @@ def test_one_response_flac_album_one_folder():
 
 
 def test_same_album_quality_distinct_titles_per_uploader():
-    """Two uploaders offering the same album+quality must get distinct titles.
+    """Two uploaders offering the same folder+quality must get distinct titles.
 
-    Titles are derived from the query (artist/album) plus detected quality, so
-    without the uploader tag every result of a music search is named identically
-    and Lidarr's interactive search is impossible to disambiguate. The uploader
-    is appended scene-style to keep each release distinguishable.
+    Artist/album are derived from the (identical) real folder, so without the
+    uploader tag both results would be named identically and Lidarr's interactive
+    search would be impossible to disambiguate. The uploader is appended
+    scene-style to keep each release distinguishable.
     """
     files_a = [make_flac("My Album", i) for i in range(1, 3)]
     files_b = [make_flac("My Album", i) for i in range(1, 3)]
@@ -194,8 +195,44 @@ def test_same_album_quality_distinct_titles_per_uploader():
 
     assert len(releases) == 2
     by_user = {r.username: r.title for r in releases}
-    assert by_user["alice"] == "My Artist - My Album [FLAC]-alice"
-    assert by_user["bob"] == "My Artist - My Album [FLAC]-bob"
+    # Artist "Artist" + album "My Album" come from the make_flac folder layout.
+    assert by_user["alice"] == "Artist - My Album [FLAC]-alice"
+    assert by_user["bob"] == "Artist - My Album [FLAC]-bob"
+
+
+def test_same_album_name_different_artist_keeps_real_artist():
+    """A same-named album by a *different* artist must keep its real artist.
+
+    Soulseek's text search is fuzzy: searching Bob/HelloWorld also surfaces
+    Alice/HelloWorld. Each result must carry the real folder artist so Lidarr
+    rejects the non-matching one (Alice ≠ Bob) instead of showing both as the
+    searched artist. Reproduces the reported false-positive/mislabel bug.
+    """
+    alice_file = AudioFile(
+        filename=r"@@p1\Music\Alice\HelloWorld\01.flac",
+        size=10_000_000,
+        extension=".flac",
+    )
+    bob_file = AudioFile(
+        filename=r"@@p2\Music\Bob\HelloWorld\01.flac",
+        size=10_000_000,
+        extension=".flac",
+    )
+    # Two distinct Soulseek peers (separate responses).
+    resp_alice = make_response("peer_one", [alice_file])
+    resp_bob = make_response("peer_two", [bob_file])
+    gateway = FakeGateway(completes_on=1, responses=[resp_alice, resp_bob])
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock)
+
+    releases = service.search(SearchQuery(artist="Bob", album="HelloWorld"))
+
+    by_artist = {r.artist: r for r in releases}
+    assert set(by_artist) == {"Alice", "Bob"}
+    assert by_artist["Alice"].album == "HelloWorld"
+    assert by_artist["Alice"].title.startswith("Alice - HelloWorld [FLAC]")
+    assert by_artist["Bob"].title.startswith("Bob - HelloWorld [FLAC]")
 
 
 def test_two_folders_produce_two_releases():
@@ -384,7 +421,7 @@ def test_term_only_query_splits_folder_on_dash():
 
 
 def test_term_only_no_dash_uses_folder_as_album():
-    """When query has only term and folder has no ' - ', album=folder, artist=''."""
+    """No ' - ' in the folder: album=folder, artist=grandparent folder."""
     f = AudioFile(
         filename=r"@@a\Artist\RandomAlbum\01.flac",
         size=10_000_000,
@@ -400,8 +437,25 @@ def test_term_only_no_dash_uses_folder_as_album():
 
     assert len(releases) == 1
     r = releases[0]
-    assert r.artist == ""
+    assert r.artist == "Artist"
     assert r.album == "RandomAlbum"
+
+
+def test_flat_folder_yields_empty_artist():
+    """A too-flat layout (no folder above the album) yields an empty artist, so
+    Lidarr cannot attribute it to the searched artist."""
+    f = AudioFile(filename=r"HelloWorld\01.flac", size=10_000_000, extension=".flac")
+    response = make_response("alice", [f])
+    gateway = FakeGateway(completes_on=1, responses=[response])
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock)
+
+    releases = service.search(SearchQuery(artist="Bob", album="HelloWorld"))
+
+    assert len(releases) == 1
+    assert releases[0].artist == ""
+    assert releases[0].album == "HelloWorld"
 
 
 # ---------------------------------------------------------------------------

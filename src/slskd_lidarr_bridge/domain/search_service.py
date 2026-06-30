@@ -76,21 +76,24 @@ class SearchService:
                 groups[f.album_folder].append(f)
 
             for folder, files in groups.items():
-                # Derive artist / album.
-                if (
-                    query.term is not None
-                    and query.artist is None
-                    and query.album is None
-                ):
-                    # Term-only query: parse the folder name.
-                    if " - " in folder:
-                        left, right = folder.split(" - ", 1)
-                        artist, album = left.strip(), right.strip()
-                    else:
-                        artist, album = "", folder
+                # Derive artist / album from the real remote folder layout, not
+                # the query, so each result reflects what will actually be
+                # downloaded. Lidarr re-parses the title and only keeps results
+                # whose artist/album resolve to the search; reporting the real
+                # artist lets it reject a same-named album by a *different*
+                # artist (e.g. Alice/HelloWorld when Bob/HelloWorld was searched)
+                # instead of mislabelling it as the searched artist.
+                if " - " in folder:
+                    # Combined "Artist - Album" folder.
+                    left, right = folder.split(" - ", 1)
+                    artist, album = left.strip(), right.strip()
                 else:
-                    artist = query.artist or ""
-                    album = query.album or ""
+                    # Plain album folder: the artist is its parent folder
+                    # (grandparent of the files); empty when the layout is too
+                    # flat to tell, in which case Lidarr drops the unidentifiable
+                    # result rather than attributing it to the searched artist.
+                    album = folder
+                    artist = files[0].artist_folder
 
                 size = sum(f.size for f in files)
                 quality = detect_quality(files)
