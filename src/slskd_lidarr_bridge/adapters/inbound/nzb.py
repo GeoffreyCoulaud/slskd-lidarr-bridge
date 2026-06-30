@@ -59,6 +59,10 @@ def parse_nzb(data: bytes) -> dict[str, Any]:
 
     Raises ValueError if the x-slskd-payload meta element is absent.
     """
+    # The stdlib/Expat XML parser (ET.fromstring) provides built-in protection
+    # against entity-amplification attacks ("billion laughs"), active by default
+    # in CPython. The deployment image python:3.13-slim ships Expat ≥ 2.8, which
+    # refuses external entities, preventing XXE file-read attacks.
     root = ET.fromstring(data)
     # Search for meta element regardless of document depth
     meta_tag = f"{{{NZB_NS}}}meta"
