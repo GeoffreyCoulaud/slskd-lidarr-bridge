@@ -228,9 +228,11 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     # ------------------------------------------------------------------
     # Step 4: POST addfile multipart → capture nzo_id
     # ------------------------------------------------------------------
+    # Lidarr sends `cat` as a query parameter, with the NZB as the only
+    # multipart part — mirror that here so the category actually round-trips.
     resp = client.post(
-        "/sabnzbd/api?mode=addfile",
-        data={"cat": "music", "name": (io.BytesIO(nzb_bytes), "release.nzb")},
+        "/sabnzbd/api?mode=addfile&cat=music",
+        data={"name": (io.BytesIO(nzb_bytes), "release.nzb")},
         content_type="multipart/form-data",
     )
     assert resp.status_code == 200
@@ -249,9 +251,13 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     assert resp.status_code == 200
     q_data = resp.get_json()
     queue_slots = q_data["queue"]["slots"]
-    assert any(s["nzo_id"] == nzo_id for s in queue_slots), (
+    queue_slot = next((s for s in queue_slots if s["nzo_id"] == nzo_id), None)
+    assert queue_slot is not None, (
         f"nzo_id {nzo_id!r} not found in queue slots: {queue_slots}"
     )
+    # The category must survive the grab; Lidarr drops items whose category
+    # does not match its configured one.
+    assert queue_slot["cat"] == "music"
 
     resp = client.get("/sabnzbd/api?mode=history")
     assert resp.status_code == 200
@@ -275,6 +281,7 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
         f"nzo_id {nzo_id!r} not found in history after completion: {history_slots}"
     )
     assert completed_slot["status"] == "Completed"
+    assert completed_slot["category"] == "music"
     assert completed_slot["storage"], "storage path must be non-empty when completed"
     expected_storage = compute_storage_path(downloads_dir, _FILES[0].filename)
     assert completed_slot["storage"] == expected_storage, (

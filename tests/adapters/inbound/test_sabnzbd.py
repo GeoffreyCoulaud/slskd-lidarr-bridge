@@ -192,6 +192,29 @@ class TestAddFile:
         _, cat = svc.started[0]
         assert cat == "music"
 
+    def test_addfile_reads_category_from_query_param(self):
+        """Lidarr sends `cat` as a URL query parameter, not a form field.
+
+        The NZB is the only multipart part; `mode`, `cat`, and `priority` ride
+        in the query string (see Lidarr's SabnzbdProxy.DownloadNzb, which calls
+        ``request.AddQueryParam("cat", ...)``). If the handler reads `cat` from
+        the form only, the job's category is empty, and Lidarr — which tracks
+        and imports only downloads whose category matches its configured one —
+        silently drops the download (empty queue, no import).
+        """
+        svc = FakeDownloadService()
+        client = _make_app(download_service=svc).test_client()
+        nzb_bytes = _sample_nzb()
+        resp = client.post(
+            "/sabnzbd/api?mode=addfile&cat=music",
+            data={"name": (io.BytesIO(nzb_bytes), "test.nzb")},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] is True
+        _, cat = svc.started[0]
+        assert cat == "music"
+
     def test_addfile_parses_nzb_payload(self):
         svc = FakeDownloadService()
         client = _make_app(download_service=svc).test_client()
