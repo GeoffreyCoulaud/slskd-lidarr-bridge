@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -407,3 +408,109 @@ def test_remove_unknown_id_is_noop():
     service.remove("SABnzbd_nzo_doesnotexist")
 
     assert gateway.cancelled == []
+
+
+# ---------------------------------------------------------------------------
+# Tests — lifecycle logging
+# ---------------------------------------------------------------------------
+
+
+def test_start_logs_enqueue(caplog):
+    service = DownloadService(FakeGateway(), FakeJobStore(), FakeClock())
+    with caplog.at_level(logging.INFO):
+        nzo_id = service.start(SAMPLE_PAYLOAD, "music")
+    assert any(
+        r.levelno == logging.INFO and nzo_id in r.getMessage()
+        for r in caplog.records
+        if "download_service" in r.name
+    )
+
+
+def test_statuses_completed_logs_once(caplog):
+    """A completed download logs INFO exactly once, not on every poll."""
+    gateway = FakeGateway(
+        transfers_by_username={
+            "alice": [
+                make_transfer(
+                    r"@@a\Artist\Album\01.flac",
+                    transfer_id="t1",
+                    state="Completed, Succeeded",
+                    bytes_transferred=10_000_000,
+                ),
+                make_transfer(
+                    r"@@a\Artist\Album\02.flac",
+                    transfer_id="t2",
+                    state="Completed, Succeeded",
+                    bytes_transferred=10_000_000,
+                ),
+            ]
+        }
+    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+    service.start(SAMPLE_PAYLOAD, "music")
+
+    with caplog.at_level(logging.INFO):
+        service.statuses()
+        service.statuses()  # polled again — must not log a second time
+
+    completed = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.INFO
+        and "completed" in r.getMessage().lower()
+        and "download_service" in r.name
+    ]
+    assert len(completed) == 1
+
+
+def test_statuses_failed_logs_warning(caplog):
+    gateway = FakeGateway(
+        transfers_by_username={
+            "alice": [
+                make_transfer(
+                    r"@@a\Artist\Album\01.flac",
+                    transfer_id="t1",
+                    state="Completed, Succeeded",
+                    bytes_transferred=10_000_000,
+                ),
+                make_transfer(
+                    r"@@a\Artist\Album\02.flac",
+                    transfer_id="t2",
+                    state="Completed, Errored",
+                    bytes_transferred=0,
+                    exception="no slots",
+                ),
+            ]
+        }
+    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+    service.start(SAMPLE_PAYLOAD, "music")
+
+    with caplog.at_level(logging.WARNING):
+        service.statuses()
+
+    assert any(
+        r.levelno == logging.WARNING and "failed" in r.getMessage().lower()
+        for r in caplog.records
+        if "download_service" in r.name
+    )
+
+
+def test_remove_logs(caplog):
+    in_progress = make_transfer(
+        r"@@a\Artist\Album\01.flac", transfer_id="t1", state="InProgress"
+    )
+    gateway = FakeGateway(transfers_by_username={"alice": [in_progress]})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+    nzo_id = service.start(SAMPLE_PAYLOAD, "music")
+
+    with caplog.at_level(logging.INFO):
+        service.remove(nzo_id)
+
+    assert any(
+        r.levelno == logging.INFO
+        and nzo_id in r.getMessage()
+        and "remov" in r.getMessage().lower()
+        for r in caplog.records
+        if "download_service" in r.name
+    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
@@ -9,6 +10,8 @@ from uuid import uuid4
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, JobStatusView
 from slskd_lidarr_bridge.domain.paths import compute_storage_path
 from slskd_lidarr_bridge.domain.ports import Clock, JobStore, SoulseekGateway
+
+logger = logging.getLogger(__name__)
 
 
 class DownloadService:
@@ -21,6 +24,9 @@ class DownloadService:
         self._gateway = gateway
         self._jobs = jobs
         self._clock = clock
+        # nzo_ids already logged at a terminal state, so each completion/failure
+        # is logged once rather than on every (frequent) status poll.
+        self._logged_terminal: set[str] = set()
 
     def completed_dir(self) -> str:
         """slskd's completed-downloads directory (reported to Lidarr as-is)."""
@@ -52,6 +58,7 @@ class DownloadService:
             created_at=self._clock.now(),
         )
         self._jobs.add(job)
+        logger.info("Enqueued download %s: %r (cat=%r)", nzo_id, title, category)
         return nzo_id
 
     def statuses(self) -> list[JobStatusView]:
@@ -85,6 +92,16 @@ class DownloadService:
                 failed = next(t for t in matched if t.is_failed)
                 fail_message = failed.exception
 
+            # Log each terminal state once — statuses() is polled repeatedly.
+            if state in ("completed", "failed") and (
+                job.nzo_id not in self._logged_terminal
+            ):
+                self._logged_terminal.add(job.nzo_id)
+                if state == "completed":
+                    logger.info("Download completed: %r → %s", job.title, storage)
+                else:
+                    logger.warning("Download failed: %r (%s)", job.title, fail_message)
+
             views.append(
                 JobStatusView(
                     nzo_id=job.nzo_id,
@@ -116,3 +133,5 @@ class DownloadService:
                 self._gateway.cancel(job.username, transfer.id)
 
         self._jobs.remove(nzo_id)
+        self._logged_terminal.discard(nzo_id)
+        logger.info("Removed download %s: %r", nzo_id, job.title)

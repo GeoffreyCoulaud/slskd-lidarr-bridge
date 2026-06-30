@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 from slskd_lidarr_bridge.domain.models import (
@@ -282,6 +283,23 @@ def test_timeout_stops_polling_without_infinite_loop():
     assert (
         len(clock.sleeps) == 1
     )  # exactly one sleep: elapsed hits timeout after first advance
+
+
+def test_timeout_logs_warning(caplog):
+    """A search hitting the timeout logs a WARNING (distinct from 'no results')."""
+    gateway = FakeGateway(completes_on=9999, responses=[])
+    store = FakeStore()
+    clock = FakeClock(advance_per_sleep=5.0)
+    service = SearchService(gateway, store, clock, search_timeout=5, poll_interval=1.0)
+
+    with caplog.at_level(logging.WARNING):
+        service.search(SearchQuery(artist="A", album="B"))
+
+    assert any(
+        r.levelno == logging.WARNING and "timed out" in r.getMessage().lower()
+        for r in caplog.records
+        if "search_service" in r.name
+    )
 
 
 def test_ordering_free_slot_before_no_slot():

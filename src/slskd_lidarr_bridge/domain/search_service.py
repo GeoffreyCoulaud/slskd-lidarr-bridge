@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
+import logging
 from collections import defaultdict
 
 from slskd_lidarr_bridge.domain.models import AudioFile, Release, SearchQuery
 from slskd_lidarr_bridge.domain.ports import Clock, ReleaseStore, SoulseekGateway
 from slskd_lidarr_bridge.domain.quality import detect_quality
 from slskd_lidarr_bridge.domain.titles import build_title
+
+logger = logging.getLogger(__name__)
 
 
 class SearchService:
@@ -47,6 +50,11 @@ class SearchService:
         while not self._gateway.search_is_complete(sid):
             elapsed = (self._clock.now() - start).total_seconds()
             if elapsed >= self._search_timeout:
+                logger.warning(
+                    "Search %r timed out after %ss; returning partial results",
+                    query.to_search_text(),
+                    self._search_timeout,
+                )
                 break
             self._clock.sleep(self._poll_interval)
 
