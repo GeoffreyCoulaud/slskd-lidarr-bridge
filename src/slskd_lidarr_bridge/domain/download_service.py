@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
@@ -20,13 +21,28 @@ class DownloadService:
         gateway: SoulseekGateway,
         jobs: JobStore,
         clock: Clock,
+        *,
+        stall_timeout: int = 1800,
+        max_retries: int = 1,
     ) -> None:
         self._gateway = gateway
         self._jobs = jobs
         self._clock = clock
+        self._stall_timeout = stall_timeout
+        self._max_retries = max_retries
         # nzo_ids already logged at a terminal state, so each completion/failure
         # is logged once rather than on every (frequent) status poll.
         self._logged_terminal: set[str] = set()
+        # Retry rounds already spent per job (nzo_id -> count). In-memory like
+        # _logged_terminal; a restart resets a job's retry budget, which only
+        # means a few extra retries in a rare case.
+        self._retries: dict[str, int] = {}
+        # Per-job progress watermark for stall detection:
+        # nzo_id -> (max transferred bytes seen, when that maximum was first seen).
+        # In-memory by design (mirrors _logged_terminal): a restart simply restarts
+        # each in-flight job's stall clock, which only delays detection by one
+        # stall_timeout window — acceptable for a rare event.
+        self._progress: dict[str, tuple[int, datetime]] = {}
 
     def completed_dir(self) -> str:
         """slskd's completed-downloads directory (reported to Lidarr as-is)."""
@@ -88,9 +104,41 @@ class DownloadService:
                         self._gateway.downloads_directory(), job.files[0].filename
                     )
             elif any(t.is_failed for t in matched):
-                state = "failed"
-                failed = next(t for t in matched if t.is_failed)
-                fail_message = failed.exception
+                used = self._retries.get(job.nzo_id, 0)
+                if used < self._max_retries:
+                    # Re-enqueue the failed files and keep the job "downloading"
+                    # rather than reporting a failure Lidarr would blocklist.
+                    failed_names = {t.filename for t in matched if t.is_failed}
+                    retry_files = [f for f in job.files if f.filename in failed_names]
+                    self._gateway.enqueue(job.username, retry_files)
+                    self._retries[job.nzo_id] = used + 1
+                    # A retry is activity — reset the stall clock below.
+                    self._progress[job.nzo_id] = (transferred_bytes, self._clock.now())
+                    logger.info(
+                        "Retrying download %s after failure (attempt %d/%d): %r",
+                        job.nzo_id,
+                        used + 1,
+                        self._max_retries,
+                        job.title,
+                    )
+                else:
+                    state = "failed"
+                    failed = next(t for t in matched if t.is_failed)
+                    fail_message = failed.exception
+
+            # Stall detection: a job still "downloading" but making no progress
+            # for stall_timeout seconds is reported failed so Lidarr stops waiting
+            # on a dead peer and can try another release. stall_timeout <= 0
+            # disables it.
+            if state == "downloading" and self._stall_timeout > 0:
+                now = self._clock.now()
+                prev = self._progress.get(job.nzo_id)
+                if prev is None or transferred_bytes > prev[0]:
+                    # First sighting or fresh progress → (re)start the stall clock.
+                    self._progress[job.nzo_id] = (transferred_bytes, now)
+                elif (now - prev[1]).total_seconds() >= self._stall_timeout:
+                    state = "failed"
+                    fail_message = f"stalled: no progress for {self._stall_timeout}s"
 
             # Log each terminal state once — statuses() is polled repeatedly.
             if state in ("completed", "failed") and (
@@ -134,4 +182,6 @@ class DownloadService:
 
         self._jobs.remove(nzo_id)
         self._logged_terminal.discard(nzo_id)
+        self._progress.pop(nzo_id, None)
+        self._retries.pop(nzo_id, None)
         logger.info("Removed download %s: %r", nzo_id, job.title)

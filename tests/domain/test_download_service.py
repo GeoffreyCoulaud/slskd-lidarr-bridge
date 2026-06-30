@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -45,6 +45,10 @@ class FakeGateway:
     def transfers(self, username: str) -> list[Transfer]:
         return list(self._transfers.get(username, []))
 
+    def set_transfers(self, username: str, transfers: list[Transfer]) -> None:
+        """Replace a user's transfers — used to script state changes across polls."""
+        self._transfers[username] = transfers
+
     def cancel(self, username: str, transfer_id: str) -> None:
         self.cancelled.append((username, transfer_id))
 
@@ -79,6 +83,10 @@ class FakeClock:
     def sleep(self, seconds: float) -> None:
         pass
 
+    def advance(self, seconds: float) -> None:
+        """Move the clock forward — used to exercise time-based behaviour."""
+        self._now = self._now + timedelta(seconds=seconds)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,6 +100,17 @@ SAMPLE_PAYLOAD: dict = {
     "files": [
         {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
         {"filename": r"@@a\Artist\Album\02.flac", "size": 10_000_000},
+    ],
+}
+
+
+SAMPLE_PAYLOAD_1: dict = {
+    "username": "alice",
+    "title": "Artist - Album [FLAC]",
+    "album_folder": "Album",
+    "total_size": 10_000_000,
+    "files": [
+        {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
     ],
 }
 
@@ -359,7 +378,8 @@ def test_statuses_failed_sets_fail_message():
             ]
         }
     )
-    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+    # max_retries=0 isolates the terminal-failure mapping (no re-enqueue).
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), max_retries=0)
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -369,6 +389,193 @@ def test_statuses_failed_sets_fail_message():
     assert v.state == "failed"
     assert v.fail_message == "no slots"
     assert v.storage is None
+
+
+# ---------------------------------------------------------------------------
+# Tests — statuses: stalled (no progress past stall_timeout)
+# ---------------------------------------------------------------------------
+
+
+def test_statuses_stalled_download_becomes_failed():
+    """A download making zero progress past stall_timeout is reported failed.
+
+    A peer that queues us remotely but never serves (or goes offline) leaves the
+    transfer making no progress indefinitely; without this it would stay
+    'downloading' forever and pin Lidarr's queue slot.
+    """
+    clock = FakeClock()
+    gateway = FakeGateway(
+        transfers_by_username={
+            "alice": [
+                make_transfer(
+                    r"@@a\Artist\Album\01.flac",
+                    transfer_id="t1",
+                    state="Queued, Remotely",
+                    bytes_transferred=0,
+                ),
+                make_transfer(
+                    r"@@a\Artist\Album\02.flac",
+                    transfer_id="t2",
+                    state="Queued, Remotely",
+                    bytes_transferred=0,
+                ),
+            ]
+        }
+    )
+    service = DownloadService(gateway, FakeJobStore(), clock, stall_timeout=1800)
+    service.start(SAMPLE_PAYLOAD, "music")
+
+    # First poll establishes the progress baseline; still downloading.
+    assert service.statuses()[0].state == "downloading"
+
+    # No progress for longer than the stall timeout → failed.
+    clock.advance(1801)
+    v = service.statuses()[0]
+    assert v.state == "failed"
+    assert "stall" in (v.fail_message or "").lower()
+
+
+def test_statuses_progress_resets_stall_clock():
+    """Byte progress between polls resets the stall timer."""
+    clock = FakeClock()
+    gateway = FakeGateway(
+        transfers_by_username={
+            "alice": [
+                make_transfer(
+                    r"@@a\Artist\Album\01.flac",
+                    transfer_id="t1",
+                    state="InProgress",
+                    bytes_transferred=0,
+                )
+            ]
+        }
+    )
+    service = DownloadService(gateway, FakeJobStore(), clock, stall_timeout=1800)
+    service.start(SAMPLE_PAYLOAD_1, "music")
+
+    assert service.statuses()[0].state == "downloading"  # baseline at t=0
+
+    clock.advance(1000)
+    gateway.set_transfers(
+        "alice",
+        [
+            make_transfer(
+                r"@@a\Artist\Album\01.flac",
+                transfer_id="t1",
+                state="InProgress",
+                bytes_transferred=5_000_000,
+            )
+        ],
+    )
+    assert service.statuses()[0].state == "downloading"  # progress resets clock
+
+    clock.advance(1000)  # 2000s elapsed total, but only 1000s since last progress
+    assert service.statuses()[0].state == "downloading"
+
+
+def test_statuses_stall_disabled_never_fails():
+    """stall_timeout=0 disables the check: a stuck download stays 'downloading'."""
+    clock = FakeClock()
+    gateway = FakeGateway(
+        transfers_by_username={
+            "alice": [
+                make_transfer(
+                    r"@@a\Artist\Album\01.flac",
+                    transfer_id="t1",
+                    state="Queued, Remotely",
+                    bytes_transferred=0,
+                )
+            ]
+        }
+    )
+    service = DownloadService(gateway, FakeJobStore(), clock, stall_timeout=0)
+    service.start(SAMPLE_PAYLOAD_1, "music")
+
+    service.statuses()
+    clock.advance(100_000)
+    assert service.statuses()[0].state == "downloading"
+
+
+# ---------------------------------------------------------------------------
+# Tests — statuses: retries (re-enqueue failed transfers before giving up)
+# ---------------------------------------------------------------------------
+
+
+def _errored_transfer() -> Transfer:
+    return make_transfer(
+        r"@@a\Artist\Album\01.flac",
+        transfer_id="t1",
+        state="Completed, Errored",
+        bytes_transferred=0,
+        exception="no slots",
+    )
+
+
+def test_statuses_failed_transfer_is_retried_and_reported_downloading():
+    """A failed transfer with retries remaining is re-enqueued, kept downloading.
+
+    Soulseek transfers fail transiently; reporting 'failed' on the first error
+    would make Lidarr blocklist the release immediately. Instead we re-enqueue.
+    """
+    gateway = FakeGateway(transfers_by_username={"alice": [_errored_transfer()]})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), max_retries=1)
+    service.start(SAMPLE_PAYLOAD_1, "music")  # initial enqueue
+
+    v = service.statuses()[0]
+
+    assert v.state == "downloading"
+    # start() enqueued once; the retry re-enqueues the failed file (2 total).
+    assert len(gateway.enqueued) == 2
+    username, files = gateway.enqueued[1]
+    assert username == "alice"
+    assert [f.filename for f in files] == [r"@@a\Artist\Album\01.flac"]
+
+
+def test_statuses_retries_exhausted_then_failed():
+    """Once retries are exhausted, a still-failing transfer is reported failed."""
+    gateway = FakeGateway(transfers_by_username={"alice": [_errored_transfer()]})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), max_retries=1)
+    service.start(SAMPLE_PAYLOAD_1, "music")
+
+    # First poll consumes the single retry → downloading.
+    assert service.statuses()[0].state == "downloading"
+    # Still failing on the next poll, no retries left → failed.
+    v = service.statuses()[0]
+    assert v.state == "failed"
+    assert v.fail_message == "no slots"
+
+
+def test_statuses_retries_disabled_fails_immediately():
+    """max_retries=0 preserves the original behaviour: fail on first error."""
+    gateway = FakeGateway(transfers_by_username={"alice": [_errored_transfer()]})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), max_retries=0)
+    service.start(SAMPLE_PAYLOAD_1, "music")
+
+    v = service.statuses()[0]
+
+    assert v.state == "failed"
+    assert len(gateway.enqueued) == 1  # no retry enqueue
+
+
+def test_statuses_retried_transfer_then_succeeds_completes():
+    """A re-enqueued transfer that subsequently succeeds completes normally."""
+    gateway = FakeGateway(transfers_by_username={"alice": [_errored_transfer()]})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), max_retries=1)
+    service.start(SAMPLE_PAYLOAD_1, "music")
+
+    assert service.statuses()[0].state == "downloading"  # retry issued
+    gateway.set_transfers(
+        "alice",
+        [
+            make_transfer(
+                r"@@a\Artist\Album\01.flac",
+                transfer_id="t1",
+                state="Completed, Succeeded",
+                bytes_transferred=10_000_000,
+            )
+        ],
+    )
+    assert service.statuses()[0].state == "completed"
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +690,7 @@ def test_statuses_failed_logs_warning(caplog):
             ]
         }
     )
-    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), max_retries=0)
     service.start(SAMPLE_PAYLOAD, "music")
 
     with caplog.at_level(logging.WARNING):

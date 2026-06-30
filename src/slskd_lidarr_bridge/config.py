@@ -38,6 +38,12 @@ class Config:
         Path to the SQLite database file (default ``/data/bridge.db``).
     min_bitrate:
         Minimum acceptable bitrate in kbps; ``None`` means no filter.
+    stall_timeout:
+        Seconds a download may make no progress before it is reported failed;
+        ``<= 0`` disables stall detection. Defaults to 1800 (30 min).
+    max_retries:
+        Times a failed transfer is re-enqueued before the download is reported
+        failed to Lidarr; ``0`` fails on the first error. Defaults to 1.
     log_level:
         Root logging level name (e.g. ``INFO``, ``DEBUG``). Always a valid,
         upper-cased ``logging`` level name; defaults to ``INFO``.
@@ -50,6 +56,8 @@ class Config:
     search_timeout: int
     db_path: str
     min_bitrate: int | None
+    stall_timeout: int
+    max_retries: int
     log_level: str
 
     @classmethod
@@ -83,5 +91,7 @@ class Config:
             search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "30")),
             db_path=env.get("BRIDGE_DB_PATH", "/data/bridge.db"),
             min_bitrate=min_bitrate,
+            stall_timeout=int(env.get("BRIDGE_STALL_TIMEOUT", "1800")),
+            max_retries=int(env.get("BRIDGE_MAX_RETRIES", "1")),
             log_level=log_level,
         )

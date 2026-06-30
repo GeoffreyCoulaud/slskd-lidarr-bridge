@@ -26,6 +26,8 @@ def test_full_env_parses_all_fields():
         "SLSKD_SEARCH_TIMEOUT": "60",
         "BRIDGE_DB_PATH": "/tmp/test.db",
         "BRIDGE_MIN_BITRATE": "192",
+        "BRIDGE_STALL_TIMEOUT": "600",
+        "BRIDGE_MAX_RETRIES": "3",
     }
     cfg = Config.from_env(env)
 
@@ -36,6 +38,8 @@ def test_full_env_parses_all_fields():
     assert cfg.search_timeout == 60
     assert cfg.db_path == "/tmp/test.db"
     assert cfg.min_bitrate == 192
+    assert cfg.stall_timeout == 600
+    assert cfg.max_retries == 3
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +54,8 @@ def test_defaults_when_optional_vars_absent():
     assert cfg.search_timeout == 30
     assert cfg.db_path == "/data/bridge.db"
     assert cfg.min_bitrate is None
+    assert cfg.stall_timeout == 1800
+    assert cfg.max_retries == 1
 
 
 def test_default_newznab_categories():

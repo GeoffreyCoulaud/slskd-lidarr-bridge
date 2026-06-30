@@ -61,6 +61,8 @@ def create_app(
         gateway,
         job_store,
         clock,
+        stall_timeout=config.stall_timeout,
+        max_retries=config.max_retries,
     )
 
     newznab_bp = create_newznab_blueprint(
