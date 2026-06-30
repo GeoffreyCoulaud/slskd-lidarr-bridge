@@ -150,25 +150,30 @@ class TestMusicSearch:
         assert url.endswith("/indexer/nzb/test-id-001")
         assert enclosures[0].get("type") == "application/x-nzb"
 
-    def test_music_search_empty_terms_returns_empty_channel_no_service_call(self):
+    def test_music_search_empty_terms_returns_sentinel_no_service_call(self):
+        """Lidarr's connection test fetches the recent feed (no search terms).
+
+        We must answer with at least one item so TestConnection passes, without
+        ever hitting the search backend (slskd has no "recent uploads" concept).
+        """
         svc = FakeSearchService()
         client = _make_app(search_service=svc).test_client()
         resp = client.get("/indexer/api?t=music")
         assert resp.status_code == 200
         root = ET.fromstring(resp.data)
         items = root.findall(".//item")
-        assert items == []
+        assert len(items) == 1
         assert svc.called_with == []
 
-    def test_music_search_empty_string_q_returns_empty_channel(self):
+    def test_music_search_empty_string_q_returns_sentinel(self):
         """Lidarr sends q= (empty) alongside artist/album in rss-sync mode."""
         svc = FakeSearchService()
         client = _make_app(search_service=svc).test_client()
-        # q= empty, no artist, no album → should be treated as empty query
+        # q= empty, no artist, no album → treated as the empty/recent query
         resp = client.get("/indexer/api?t=music&q=")
         root = ET.fromstring(resp.data)
         items = root.findall(".//item")
-        assert items == []
+        assert len(items) == 1
         assert svc.called_with == []
 
     def test_music_search_category_lossless_flac(self):
@@ -212,6 +217,34 @@ class TestMusicSearch:
 
 
 # ---------------------------------------------------------------------------
+# Tests: recent/test feed sentinel
+# ---------------------------------------------------------------------------
+
+
+class TestRecentFeedSentinel:
+    """The empty/recent feed must satisfy Lidarr's TestConnection."""
+
+    def test_sentinel_category_is_a_configured_category(self):
+        configured = [(3000, "Audio"), (3010, "Audio/MP3"), (3040, "Audio/Lossless")]
+        client = _make_app(categories=configured).test_client()
+        resp = client.get("/indexer/api?t=music")
+        root = ET.fromstring(resp.data)
+        attrs = root.findall(f".//{{{NEWZNAB_NS}}}attr[@name='category']")
+        assert len(attrs) == 1
+        configured_ids = {str(cid) for cid, _ in configured}
+        assert attrs[0].get("value") in configured_ids
+
+    def test_sentinel_item_has_nzb_enclosure(self):
+        client = _make_app().test_client()
+        resp = client.get("/indexer/api?t=music")
+        assert "xml" in resp.content_type
+        root = ET.fromstring(resp.data)
+        enclosures = root.findall(".//enclosure")
+        assert len(enclosures) == 1
+        assert enclosures[0].get("type") == "application/x-nzb"
+
+
+# ---------------------------------------------------------------------------
 # Tests: term search
 # ---------------------------------------------------------------------------
 
@@ -224,10 +257,14 @@ class TestTermSearch:
         assert len(svc.called_with) == 1
         assert svc.called_with[0].term == "pink floyd"
 
-    def test_search_empty_term_returns_empty_channel(self):
+    def test_search_empty_term_returns_sentinel(self):
         svc = FakeSearchService()
         client = _make_app(search_service=svc).test_client()
-        client.get("/indexer/api?t=search&q=")
+        resp = client.get("/indexer/api?t=search&q=")
+        root = ET.fromstring(resp.data)
+        items = root.findall(".//item")
+        assert len(items) == 1
+        # The recent/test feed must never reach the search backend.
         assert svc.called_with == []
 
 
