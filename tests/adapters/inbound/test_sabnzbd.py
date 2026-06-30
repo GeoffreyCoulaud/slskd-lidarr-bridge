@@ -121,7 +121,20 @@ class TestGetConfig:
         client = _make_app().test_client()
         resp = client.get("/sabnzbd/api?mode=get_config")
         data = resp.get_json()
-        assert "music" in data["config"]["categories"]
+        names = [c["name"] for c in data["config"]["categories"]]
+        assert "music" in names
+
+    def test_get_config_categories_are_objects_with_name(self):
+        """Lidarr deserializes categories into SabnzbdCategory objects.
+
+        Returning bare strings makes the download-client test abort with a
+        cast error, so each category must be a JSON object carrying a name.
+        """
+        client = _make_app().test_client()
+        resp = client.get("/sabnzbd/api?mode=get_config")
+        cats = resp.get_json()["config"]["categories"]
+        assert isinstance(cats, list)
+        assert all(isinstance(c, dict) and "name" in c for c in cats)
 
 
 # ---------------------------------------------------------------------------
