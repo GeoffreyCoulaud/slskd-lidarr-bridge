@@ -28,6 +28,8 @@ def test_full_env_parses_all_fields():
         "BRIDGE_MIN_BITRATE": "192",
         "BRIDGE_STALL_TIMEOUT": "600",
         "BRIDGE_MAX_RETRIES": "3",
+        "BRIDGE_MIN_RESULTS": "5",
+        "BRIDGE_SEARCH_BUDGET": "120",
     }
     cfg = Config.from_env(env)
 
@@ -40,6 +42,8 @@ def test_full_env_parses_all_fields():
     assert cfg.min_bitrate == 192
     assert cfg.stall_timeout == 600
     assert cfg.max_retries == 3
+    assert cfg.min_results == 5
+    assert cfg.search_budget == 120
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +60,8 @@ def test_defaults_when_optional_vars_absent():
     assert cfg.min_bitrate is None
     assert cfg.stall_timeout == 1800
     assert cfg.max_retries == 1
+    assert cfg.min_results == 3
+    assert cfg.search_budget == 75
 
 
 def test_default_newznab_categories():
