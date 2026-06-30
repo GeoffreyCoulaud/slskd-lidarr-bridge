@@ -76,7 +76,11 @@ def create_sabnzbd_blueprint(
                 return jsonify({"status": False, "error": "no nzb file provided"})
             nzb_bytes = file_storage.read()
             payload = parse_nzb(nzb_bytes)
-            category = request.form.get("cat", "")
+            # Lidarr sends `cat` as a URL query parameter (the NZB is the only
+            # multipart part), so read it from the query string as well as the
+            # form. An empty category makes Lidarr drop the download: it only
+            # tracks and imports items whose category matches its configured one.
+            category = _get_param("cat") or ""
             nzo_id = download_service.start(payload, category)
             return jsonify({"status": True, "nzo_ids": [nzo_id]})
 
