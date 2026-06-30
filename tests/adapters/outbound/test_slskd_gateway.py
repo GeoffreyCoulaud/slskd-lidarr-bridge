@@ -41,8 +41,42 @@ def test_start_search_posts_correct_body_and_header():
     import json
 
     body = json.loads(request.content)
-    assert body == {"searchText": "artist album"}
+    # The configured search timeout is forwarded to slskd in MILLISECONDS, so the
+    # setting governs slskd's own search window (default 30s → 30000ms) rather
+    # than only the bridge's client-side polling.
+    assert body == {"searchText": "artist album", "searchTimeout": 30000}
     assert request.headers["x-api-key"] == API_KEY
+
+
+@respx.mock
+def test_start_search_forwards_timeout_in_milliseconds():
+    route = respx.post(f"{BASE_URL}/api/v0/searches").mock(
+        return_value=httpx.Response(200, json={"id": "abc"})
+    )
+    client = httpx.Client(base_url=BASE_URL)
+    gw = SlskdGateway(BASE_URL, API_KEY, client=client, search_timeout=45)
+    gw.start_search("q")
+
+    import json
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["searchTimeout"] == 45000
+
+
+@respx.mock
+def test_start_search_omits_timeout_when_non_positive():
+    """search_timeout<=0 omits searchTimeout (slskd's [Range(5,..)] would 400)."""
+    route = respx.post(f"{BASE_URL}/api/v0/searches").mock(
+        return_value=httpx.Response(200, json={"id": "abc"})
+    )
+    client = httpx.Client(base_url=BASE_URL)
+    gw = SlskdGateway(BASE_URL, API_KEY, client=client, search_timeout=0)
+    gw.start_search("q")
+
+    import json
+
+    body = json.loads(route.calls.last.request.content)
+    assert "searchTimeout" not in body
 
 
 # ---------------------------------------------------------------------------

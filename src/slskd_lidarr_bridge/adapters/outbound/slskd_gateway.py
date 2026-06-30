@@ -44,8 +44,14 @@ class SlskdGateway:
         The ``X-API-Key`` header is always merged onto the client so that
         tests that inject a plain client still exercise the auth path.
     timeout:
-        Per-request timeout in seconds (used only when the client is
+        Per-request HTTP timeout in seconds (used only when the client is
         default-constructed here).
+    search_timeout:
+        Seconds slskd should spend gathering responses for a search. Forwarded
+        as ``searchTimeout`` (in milliseconds) on ``start_search`` so the
+        configured value governs slskd's own search window, not just the
+        bridge's polling. ``<= 0`` omits the field (slskd enforces a minimum and
+        would reject a zero value), falling back to slskd's own default.
     """
 
     def __init__(
@@ -55,7 +61,9 @@ class SlskdGateway:
         *,
         client: httpx.Client | None = None,
         timeout: float = 30.0,
+        search_timeout: int = 30,
     ) -> None:
+        self._search_timeout = search_timeout
         if client is None:
             self._client = httpx.Client(
                 base_url=base_url,
@@ -73,8 +81,16 @@ class SlskdGateway:
     # ------------------------------------------------------------------
 
     def start_search(self, text: str) -> str:
-        """POST /api/v0/searches → return the new search id."""
-        r = self._client.post("/api/v0/searches", json={"searchText": text})
+        """POST /api/v0/searches → return the new search id.
+
+        ``searchTimeout`` is sent in milliseconds (slskd's unit) so the
+        configured timeout governs slskd's search window. It is omitted for a
+        non-positive timeout, since slskd rejects values below its minimum.
+        """
+        body: dict[str, object] = {"searchText": text}
+        if self._search_timeout > 0:
+            body["searchTimeout"] = self._search_timeout * 1000
+        r = self._client.post("/api/v0/searches", json=body)
         r.raise_for_status()
         search_id: str = r.json()["id"]
         return search_id
