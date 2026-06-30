@@ -7,6 +7,8 @@ Exposes:
 
 from __future__ import annotations
 
+import hmac
+
 from flask import Blueprint, Response, jsonify, request
 
 from slskd_lidarr_bridge.adapters.inbound.nzb import parse_nzb
@@ -32,17 +34,31 @@ _CATEGORIES: list[dict[str, str | int]] = [
 
 def create_sabnzbd_blueprint(
     download_service: DownloadService,
+    *,
+    api_key: str | None = None,
 ) -> Blueprint:
     """Build and return the SABnzbd shim Blueprint.
 
     Args:
         download_service: implements DownloadService with start/statuses/remove
             and completed_dir() (slskd's completed-downloads directory).
+        api_key: optional shared key; when set, every request must supply a
+            matching ``apikey`` query parameter or form field. ``None`` disables
+            auth.
 
     Returns:
         A Flask Blueprint registered at url_prefix="/sabnzbd".
     """
     bp = Blueprint("sabnzbd", __name__, url_prefix="/sabnzbd")
+
+    @bp.before_request
+    def check_api_key() -> Response | None:
+        if api_key is None:
+            return None
+        provided = request.args.get("apikey") or request.form.get("apikey")
+        if not hmac.compare_digest(provided or "", api_key):
+            return jsonify({"status": False, "error": "API Key Incorrect"})
+        return None
 
     def _get_param(name: str) -> str | None:
         """Read a parameter from query string or form body."""

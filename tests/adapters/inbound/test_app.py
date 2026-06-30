@@ -144,6 +144,7 @@ def _make_config(**overrides) -> Config:
         log_level="INFO",
         min_results=3,
         search_budget=75,
+        api_key=None,
     )
     defaults.update(overrides)
     return Config(**defaults)
@@ -343,3 +344,82 @@ class TestErrorHandlerNoLeakage:
             if r.name == "slskd_lidarr_bridge.adapters.inbound.app"
         ]
         assert any(eid in r.getMessage() for r in app_records)
+
+
+# ---------------------------------------------------------------------------
+# Tests: API key wiring through create_app
+# ---------------------------------------------------------------------------
+
+
+class TestApiKeyWiring:
+    KEY = "s3cr3t"
+
+    def test_health_exempt_when_key_configured(self):
+        """/health must not require an API key even when one is configured."""
+        config = _make_config(api_key=self.KEY)
+        app = create_app(
+            config, FakeGateway(), FakeReleaseStore(), FakeJobStore(), FakeClock()
+        )
+        resp = app.test_client().get("/health")
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "ok"
+
+    def test_newznab_requires_key_when_configured(self):
+        config = _make_config(api_key=self.KEY)
+        app = create_app(
+            config, FakeGateway(), FakeReleaseStore(), FakeJobStore(), FakeClock()
+        )
+        resp = app.test_client().get("/indexer/api?t=caps")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "error"
+        assert root.get("code") == "100"
+
+    def test_newznab_passes_with_correct_key(self):
+        config = _make_config(api_key=self.KEY)
+        app = create_app(
+            config, FakeGateway(), FakeReleaseStore(), FakeJobStore(), FakeClock()
+        )
+        resp = app.test_client().get(f"/indexer/api?t=caps&apikey={self.KEY}")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "caps"
+
+    def test_sabnzbd_requires_key_when_configured(self):
+        config = _make_config(api_key=self.KEY)
+        app = create_app(
+            config, FakeGateway(), FakeReleaseStore(), FakeJobStore(), FakeClock()
+        )
+        resp = app.test_client().get("/sabnzbd/api?mode=version")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] is False
+        assert data["error"] == "API Key Incorrect"
+
+    def test_sabnzbd_passes_with_correct_key(self):
+        config = _make_config(api_key=self.KEY)
+        app = create_app(
+            config, FakeGateway(), FakeReleaseStore(), FakeJobStore(), FakeClock()
+        )
+        resp = app.test_client().get(f"/sabnzbd/api?mode=version&apikey={self.KEY}")
+        assert resp.status_code == 200
+        assert "version" in resp.get_json()
+
+    def test_no_key_configured_no_auth_required_newznab(self):
+        config = _make_config(api_key=None)
+        app = create_app(
+            config, FakeGateway(), FakeReleaseStore(), FakeJobStore(), FakeClock()
+        )
+        resp = app.test_client().get("/indexer/api?t=caps")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "caps"
+
+    def test_no_key_configured_no_auth_required_sabnzbd(self):
+        config = _make_config(api_key=None)
+        app = create_app(
+            config, FakeGateway(), FakeReleaseStore(), FakeJobStore(), FakeClock()
+        )
+        resp = app.test_client().get("/sabnzbd/api?mode=version")
+        assert resp.status_code == 200
+        assert "version" in resp.get_json()

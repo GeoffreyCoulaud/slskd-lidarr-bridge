@@ -7,6 +7,7 @@ Exposes:
 
 from __future__ import annotations
 
+import hmac
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -61,6 +62,7 @@ def create_newznab_blueprint(
     release_store: ReleaseStore,
     *,
     categories: list[tuple[int, str]],
+    api_key: str | None = None,
 ) -> Blueprint:
     """Build and return the Newznab indexer Blueprint.
 
@@ -68,6 +70,8 @@ def create_newznab_blueprint(
         search_service: implements SearchService.search(SearchQuery) -> list[Release].
         release_store: implements ReleaseStore.get(release_id) -> Release | None.
         categories: list of (id, name) tuples forwarded to build_caps.
+        api_key: optional shared key; when set, every request must supply a
+            matching ``apikey`` query parameter. ``None`` disables auth.
 
     Returns:
         A Flask Blueprint registered at url_prefix="/indexer".
@@ -78,6 +82,19 @@ def create_newznab_blueprint(
     # category is always one Lidarr knows about (it is in the caps), so the test
     # accepts it as "in the configured categories".
     sentinel_category = categories[0][0]
+
+    @bp.before_request
+    def check_api_key() -> Response | None:
+        if api_key is None:
+            return None
+        provided = request.args.get("apikey")
+        if not hmac.compare_digest(provided or "", api_key):
+            return Response(
+                build_error(100, "Incorrect API key"),
+                status=200,
+                content_type="application/xml",
+            )
+        return None
 
     @bp.route("/api")
     def api() -> Response:
@@ -120,6 +137,13 @@ def create_newznab_blueprint(
             content_type="application/xml",
         )
 
+    def _nzb_url(release_id: str) -> str:
+        """Build the NZB download URL, embedding the API key when configured."""
+        key_kwargs: dict[str, str] = {"apikey": api_key} if api_key is not None else {}
+        return url_for(
+            "newznab.nzb", release_id=release_id, _external=True, **key_kwargs
+        )
+
     def _build_recent_feed() -> bytes:
         """Single-item feed for empty/recent queries (Lidarr connection test).
 
@@ -127,11 +151,10 @@ def create_newznab_blueprint(
         TestConnection accepts the indexer. See ``_SENTINEL_*`` for why this is
         safe even when RSS sync is enabled. The search backend is never called.
         """
-        nzb_url = url_for("newznab.nzb", release_id=_SENTINEL_GUID, _external=True)
         item: dict[str, Any] = {
             "title": _SENTINEL_TITLE,
             "guid": _SENTINEL_GUID,
-            "link": nzb_url,
+            "link": _nzb_url(_SENTINEL_GUID),
             "pubDate": _SENTINEL_PUBDATE,
             "size": 1,
             "category": sentinel_category,
@@ -142,13 +165,16 @@ def create_newznab_blueprint(
         """Convert a list of Release objects to RSS bytes."""
         items: list[dict[str, Any]] = []
         for release in releases:
-            nzb_url = url_for("newznab.nzb", release_id=release.id, _external=True)
+            # Releases returned by search_service are always stored first, so
+            # their id is always set. The Optional only exists to support the
+            # pre-storage construction pattern on the domain model.
+            assert release.id is not None, "stored releases must have an id"
             category = _quality_to_category(release.quality)
             items.append(
                 {
                     "title": release.title,
                     "guid": release.id,
-                    "link": nzb_url,
+                    "link": _nzb_url(release.id),
                     "pubDate": release.created_at,
                     "size": release.size,
                     "category": category,

@@ -67,12 +67,13 @@ def _make_status(
 def _make_app(
     download_service=None,
     complete_dir: str = "/downloads",
+    api_key=None,
 ) -> flask.Flask:
     if download_service is None:
         download_service = FakeDownloadService(complete_dir=complete_dir)
 
     app = flask.Flask(__name__)
-    bp = create_sabnzbd_blueprint(download_service)
+    bp = create_sabnzbd_blueprint(download_service, api_key=api_key)
     app.register_blueprint(bp)
     return app
 
@@ -449,3 +450,117 @@ class TestUnknownMode:
         # An unknown mode must not start or remove anything.
         assert svc.started == []
         assert svc.removed == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: API key authentication
+# ---------------------------------------------------------------------------
+
+
+class TestApiKeyAuth:
+    KEY = "s3cr3t"
+
+    # -- No-key regression: all requests pass without apikey --
+
+    def test_no_key_version_needs_no_apikey(self):
+        client = _make_app().test_client()
+        resp = client.get("/sabnzbd/api?mode=version")
+        assert resp.status_code == 200
+        assert "version" in resp.get_json()
+
+    def test_no_key_addfile_needs_no_apikey(self):
+        svc = FakeDownloadService()
+        client = _make_app(download_service=svc).test_client()
+        nzb_bytes = _sample_nzb()
+        resp = client.post(
+            "/sabnzbd/api?mode=addfile&cat=music",
+            data={"name": (io.BytesIO(nzb_bytes), "test.nzb")},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] is True
+
+    # -- Key set: missing apikey → error payload at HTTP 200 --
+
+    def test_key_set_missing_apikey_version_returns_error(self):
+        client = _make_app(api_key=self.KEY).test_client()
+        resp = client.get("/sabnzbd/api?mode=version")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] is False
+        assert data["error"] == "API Key Incorrect"
+
+    def test_key_set_missing_apikey_queue_returns_error(self):
+        client = _make_app(api_key=self.KEY).test_client()
+        resp = client.get("/sabnzbd/api?mode=queue")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] is False
+        assert data["error"] == "API Key Incorrect"
+
+    def test_key_set_missing_apikey_addfile_returns_error(self):
+        client = _make_app(api_key=self.KEY).test_client()
+        nzb_bytes = _sample_nzb()
+        resp = client.post(
+            "/sabnzbd/api?mode=addfile&cat=music",
+            data={"name": (io.BytesIO(nzb_bytes), "test.nzb")},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] is False
+        assert data["error"] == "API Key Incorrect"
+
+    # -- Key set: wrong apikey → error --
+
+    def test_key_set_wrong_apikey_returns_error(self):
+        client = _make_app(api_key=self.KEY).test_client()
+        resp = client.get("/sabnzbd/api?mode=version&apikey=wrongkey")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] is False
+
+    # -- Key set: correct apikey → normal response --
+
+    def test_key_set_correct_apikey_version_succeeds(self):
+        client = _make_app(api_key=self.KEY).test_client()
+        resp = client.get(f"/sabnzbd/api?mode=version&apikey={self.KEY}")
+        assert resp.status_code == 200
+        assert "version" in resp.get_json()
+
+    def test_key_set_correct_apikey_queue_succeeds(self):
+        client = _make_app(api_key=self.KEY).test_client()
+        resp = client.get(f"/sabnzbd/api?mode=queue&apikey={self.KEY}")
+        assert resp.status_code == 200
+        assert "queue" in resp.get_json()
+
+    # -- addfile: key read from query param --
+
+    def test_key_set_addfile_accepts_key_from_query(self):
+        svc = FakeDownloadService()
+        client = _make_app(download_service=svc, api_key=self.KEY).test_client()
+        nzb_bytes = _sample_nzb()
+        resp = client.post(
+            f"/sabnzbd/api?mode=addfile&cat=music&apikey={self.KEY}",
+            data={"name": (io.BytesIO(nzb_bytes), "test.nzb")},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] is True
+
+    # -- addfile: key read from form body --
+
+    def test_key_set_addfile_accepts_key_from_form(self):
+        svc = FakeDownloadService()
+        client = _make_app(download_service=svc, api_key=self.KEY).test_client()
+        nzb_bytes = _sample_nzb()
+        resp = client.post(
+            "/sabnzbd/api?mode=addfile&cat=music",
+            data={
+                "apikey": self.KEY,
+                "name": (io.BytesIO(nzb_bytes), "test.nzb"),
+            },
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] is True
