@@ -434,3 +434,92 @@ def test_downloads_directory_raises_on_500():
     gw, _ = make_gateway()
     with pytest.raises(httpx.HTTPStatusError):
         gw.downloads_directory()
+
+
+# ---------------------------------------------------------------------------
+# Path-segment encoding — security / robustness hardening
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_enqueue_encodes_traversal_username():
+    """Traversal username must be percent-encoded, not traversed.
+
+    ``../../api/v0/options`` as a username should produce a request to
+    ``/api/v0/transfers/downloads/..%2F..%2Fapi%2Fv0%2Foptions``, NOT to
+    ``/api/v0/options`` or any other traversed path.
+    """
+    malicious_username = "../../api/v0/options"
+    # The exact encoded path the gateway MUST produce
+    expected_path = "/api/v0/transfers/downloads/..%2F..%2Fapi%2Fv0%2Foptions"
+    route = respx.post(f"{BASE_URL}{expected_path}").mock(
+        return_value=httpx.Response(201)
+    )
+    # Register the "traversed" path as unmatched so a wrong call would raise
+    gw, _ = make_gateway()
+    files = [AudioFile(filename="file.flac", size=1000, extension=".flac")]
+    gw.enqueue(malicious_username, files)
+
+    assert route.called, "enqueue must POST to the percent-encoded path"
+    actual_raw_path = route.calls.last.request.url.raw_path
+    # raw_path preserves percent-encoding; url.path decodes it (misleading but correct)
+    assert actual_raw_path == expected_path.encode(), (
+        "enqueue must send the path with %2F intact, not traversed"
+    )
+
+
+@respx.mock
+def test_transfers_encodes_special_chars_in_username():
+    """A username containing ``?`` and ``=`` must not inject query parameters.
+
+    ``transfers("user?remove=true")`` must issue a single GET with the
+    ``?`` encoded — the query string of the actual request must be empty.
+    """
+    malicious_username = "user?remove=true"
+    encoded_username = "user%3Fremove%3Dtrue"
+    expected_path = f"/api/v0/transfers/downloads/{encoded_username}"
+    route = respx.get(f"{BASE_URL}{expected_path}").mock(
+        return_value=httpx.Response(200, json={"directories": []})
+    )
+    gw, _ = make_gateway()
+    result = gw.transfers(malicious_username)
+
+    assert route.called, "transfers must GET the percent-encoded path"
+    actual_url = route.calls.last.request.url
+    # raw_path preserves percent-encoding; url.path decodes it (misleading but correct)
+    assert actual_url.raw_path == expected_path.encode(), (
+        "transfers must send the path with %3F intact, not injecting a query param"
+    )
+    assert actual_url.query == b"", "No query parameters must be injected"
+    assert result == []
+
+
+@respx.mock
+def test_start_search_posts_to_static_searches_path():
+    """Static path segments must still reach the correct endpoint after encoding.
+
+    Encoding ``api``, ``v0``, ``searches`` (no reserved chars) must produce
+    the identical path ``/api/v0/searches``.
+    """
+    route = respx.post(f"{BASE_URL}/api/v0/searches").mock(
+        return_value=httpx.Response(200, json={"id": "enc-test-id"})
+    )
+    gw, _ = make_gateway()
+    result = gw.start_search("test query")
+
+    assert route.called
+    assert result == "enc-test-id"
+
+
+@respx.mock
+def test_search_is_complete_encodes_search_id():
+    """A plain alphanumeric search_id must survive encoding unchanged."""
+    search_id = "abc123"
+    route = respx.get(f"{BASE_URL}/api/v0/searches/{search_id}").mock(
+        return_value=httpx.Response(200, json={"isComplete": False})
+    )
+    gw, _ = make_gateway()
+    gw.search_is_complete(search_id)
+
+    assert route.called
+    assert route.calls.last.request.url.path == f"/api/v0/searches/{search_id}"

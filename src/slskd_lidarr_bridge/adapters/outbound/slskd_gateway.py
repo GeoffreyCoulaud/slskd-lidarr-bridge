@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+from urllib.parse import quote
+
 import httpx
 
 from slskd_lidarr_bridge.domain.models import AudioFile, SearchResponse, Transfer
@@ -77,6 +80,22 @@ class SlskdGateway:
         self._downloads_directory: str | None = None
 
     # ------------------------------------------------------------------
+    # Internal request helper
+    # ------------------------------------------------------------------
+
+    def _req(self, method: str, *segments: str, **kwargs: Any) -> httpx.Response:
+        """Issue an HTTP request with every path segment percent-encoded.
+
+        All callers pass path segments as positional strings; this method
+        encodes each one with ``quote(s, safe="")``) so no reserved character
+        (``/``, ``?``, ``#``, ``..``, …) can escape its segment boundary.
+        ``**kwargs`` are forwarded verbatim to ``httpx.Client.request``
+        (e.g. ``json=``, ``params=``).
+        """
+        path = "/".join(quote(s, safe="") for s in segments)
+        return self._client.request(method, f"/{path}", **kwargs)
+
+    # ------------------------------------------------------------------
     # SoulseekGateway implementation
     # ------------------------------------------------------------------
 
@@ -90,20 +109,20 @@ class SlskdGateway:
         body: dict[str, object] = {"searchText": text}
         if self._search_timeout > 0:
             body["searchTimeout"] = self._search_timeout * 1000
-        r = self._client.post("/api/v0/searches", json=body)
+        r = self._req("POST", "api", "v0", "searches", json=body)
         r.raise_for_status()
         search_id: str = r.json()["id"]
         return search_id
 
     def search_is_complete(self, search_id: str) -> bool:
         """GET /api/v0/searches/{id} → read isComplete."""
-        r = self._client.get(f"/api/v0/searches/{search_id}")
+        r = self._req("GET", "api", "v0", "searches", search_id)
         r.raise_for_status()
         return bool(r.json()["isComplete"])
 
     def search_responses(self, search_id: str) -> list[SearchResponse]:
         """GET /api/v0/searches/{id}/responses → list[SearchResponse]."""
-        r = self._client.get(f"/api/v0/searches/{search_id}/responses")
+        r = self._req("GET", "api", "v0", "searches", search_id, "responses")
         r.raise_for_status()
         results: list[SearchResponse] = []
         for item in r.json():
@@ -131,7 +150,9 @@ class SlskdGateway:
     def enqueue(self, username: str, files: list[AudioFile]) -> None:
         """POST /api/v0/transfers/downloads/{username} with [{filename, size}, ...]."""
         payload = [{"filename": f.filename, "size": f.size} for f in files]
-        r = self._client.post(f"/api/v0/transfers/downloads/{username}", json=payload)
+        r = self._req(
+            "POST", "api", "v0", "transfers", "downloads", username, json=payload
+        )
         r.raise_for_status()
 
     def transfers(self, username: str) -> list[Transfer]:
@@ -141,7 +162,7 @@ class SlskdGateway:
         Note: slskd does not expose a local on-disk path in this payload,
         so local_path is always None.
         """
-        r = self._client.get(f"/api/v0/transfers/downloads/{username}")
+        r = self._req("GET", "api", "v0", "transfers", "downloads", username)
         if r.status_code == 404:
             return []
         r.raise_for_status()
@@ -166,8 +187,14 @@ class SlskdGateway:
 
     def cancel(self, username: str, transfer_id: str) -> None:
         """DELETE /api/v0/transfers/downloads/{username}/{id}?remove=true."""
-        r = self._client.delete(
-            f"/api/v0/transfers/downloads/{username}/{transfer_id}",
+        r = self._req(
+            "DELETE",
+            "api",
+            "v0",
+            "transfers",
+            "downloads",
+            username,
+            transfer_id,
             params={"remove": "true"},
         )
         r.raise_for_status()
@@ -181,7 +208,7 @@ class SlskdGateway:
         to change this value, so it is stable for the process lifetime.
         """
         if self._downloads_directory is None:
-            r = self._client.get("/api/v0/options")
+            r = self._req("GET", "api", "v0", "options")
             r.raise_for_status()
             self._downloads_directory = str(r.json()["directories"]["downloads"])
         return self._downloads_directory
