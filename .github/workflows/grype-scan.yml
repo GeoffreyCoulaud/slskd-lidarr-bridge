@@ -40,7 +40,7 @@ jobs:
             --certificate-identity-regexp "${CERT_REGEXP}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "${IMAGE}" \
-            | jq -r '.payload | @base64d | fromjson | .predicate' \
+            | jq -rs '.[0].payload | @base64d | fromjson | .predicate' \
             > /tmp/sbom.cyclonedx.json
 
       - name: Run Grype against SBOM
