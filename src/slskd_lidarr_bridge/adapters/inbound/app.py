@@ -56,6 +56,8 @@ def create_app(
         clock,
         search_timeout=config.search_timeout,
         min_bitrate=config.min_bitrate,
+        min_results=config.min_results,
+        search_budget=config.search_budget,
     )
     download_service = DownloadService(
         gateway,

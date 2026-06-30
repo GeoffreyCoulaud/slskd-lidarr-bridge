@@ -20,31 +20,42 @@ from slskd_lidarr_bridge.domain.search_service import SearchService
 
 
 class FakeGateway:
-    """Scriptable SoulseekGateway: completes after `completes_on` checks."""
+    """Scriptable SoulseekGateway.
+
+    Each started search has its own poll counter (so multiple searches in one
+    SearchService.search() call are independent). `responses_by_text` maps a
+    query string to its responses; any unmapped text falls back to `responses`.
+    """
 
     def __init__(
         self,
         *,
         completes_on: int = 1,
         responses: list[SearchResponse] | None = None,
+        responses_by_text: dict[str, list[SearchResponse]] | None = None,
     ) -> None:
         self._completes_on = completes_on
-        self._check_count = 0
-        self._responses: list[SearchResponse] = responses or []
+        self._default: list[SearchResponse] = responses or []
+        self._by_text = responses_by_text or {}
         self.started_searches: list[str] = []
         self._sid_counter = 0
+        self._sid_text: dict[str, str] = {}
+        self._poll_counts: dict[str, int] = {}
 
     def start_search(self, text: str) -> str:
-        self.started_searches.append(text)
         self._sid_counter += 1
-        return f"search-{self._sid_counter}"
+        sid = f"search-{self._sid_counter}"
+        self.started_searches.append(text)
+        self._sid_text[sid] = text
+        self._poll_counts[sid] = 0
+        return sid
 
     def search_is_complete(self, search_id: str) -> bool:
-        self._check_count += 1
-        return self._check_count >= self._completes_on
+        self._poll_counts[search_id] += 1
+        return self._poll_counts[search_id] >= self._completes_on
 
     def search_responses(self, search_id: str) -> list[SearchResponse]:
-        return list(self._responses)
+        return list(self._by_text.get(self._sid_text[search_id], self._default))
 
     # Unused in search service — satisfy Protocol
     def enqueue(self, username: str, files: list[AudioFile]) -> None: ...
@@ -263,7 +274,9 @@ def test_polling_completes_on_third_check():
     gateway = FakeGateway(completes_on=3, responses=[response])
     store = FakeStore()
     clock = FakeClock()
-    service = SearchService(gateway, store, clock, search_timeout=30, poll_interval=1.0)
+    service = SearchService(
+        gateway, store, clock, search_timeout=30, poll_interval=1.0, min_results=1
+    )
 
     service.search(SearchQuery(artist="A", album="B"))
 
@@ -276,7 +289,9 @@ def test_timeout_stops_polling_without_infinite_loop():
     store = FakeStore()
     # advance 5 s per sleep so elapsed >= search_timeout=5 after the first sleep
     clock = FakeClock(advance_per_sleep=5.0)
-    service = SearchService(gateway, store, clock, search_timeout=5, poll_interval=1.0)
+    service = SearchService(
+        gateway, store, clock, search_timeout=5, poll_interval=1.0, min_results=0
+    )
 
     result = service.search(SearchQuery(artist="A", album="B"))
 
@@ -291,7 +306,9 @@ def test_timeout_logs_warning(caplog):
     gateway = FakeGateway(completes_on=9999, responses=[])
     store = FakeStore()
     clock = FakeClock(advance_per_sleep=5.0)
-    service = SearchService(gateway, store, clock, search_timeout=5, poll_interval=1.0)
+    service = SearchService(
+        gateway, store, clock, search_timeout=5, poll_interval=1.0, min_results=0
+    )
 
     with caplog.at_level(logging.WARNING):
         service.search(SearchQuery(artist="A", album="B"))
@@ -587,3 +604,57 @@ def test_empty_query_does_not_purge_and_no_gateway_call():
     assert result == []
     assert gateway.started_searches == []
     assert store.purge_calls == []
+
+
+def test_walks_to_fallback_when_primary_returns_too_few():
+    # Primary ("Beyonce Lemonade Deluxe") finds nothing; the edition-stripped
+    # fallback ("Beyonce Lemonade") finds an album.
+    primary = "Beyonce Lemonade (Deluxe)"
+    fallback = "Beyonce Lemonade"
+    resp = make_response("alice", [make_flac("Lemonade", 1)])
+    gateway = FakeGateway(
+        completes_on=1,
+        responses_by_text={fallback: [resp]},  # primary text → [] (default)
+    )
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock, min_results=3)
+
+    releases = service.search(SearchQuery(artist="Beyonce", album="Lemonade (Deluxe)"))
+
+    assert len(releases) == 1
+    assert gateway.started_searches[0] == primary
+    assert fallback in gateway.started_searches
+
+
+def test_stops_at_threshold_after_primary():
+    # Primary alone yields 3 folders (= min_results) → no fallback issued.
+    resp = make_response(
+        "alice",
+        [make_flac("A", 1), make_flac("B", 1), make_flac("C", 1)],
+    )
+    gateway = FakeGateway(completes_on=1, responses_by_text={"X Y": [resp]})
+    service = SearchService(gateway, FakeStore(), FakeClock(), min_results=3)
+    releases = service.search(SearchQuery(artist="X", album="Y"))
+    assert len(releases) == 3
+    assert gateway.started_searches == ["X Y"]  # exactly one search
+
+
+def test_budget_zero_runs_primary_only():
+    resp = make_response("alice", [make_flac("Album", 1)])
+    gateway = FakeGateway(completes_on=1, responses=[resp])
+    service = SearchService(
+        gateway, FakeStore(), FakeClock(), min_results=99, search_budget=0
+    )
+    service.search(SearchQuery(artist="A", album="B"))
+    assert len(gateway.started_searches) == 1  # fallbacks disabled by budget<=0
+
+
+def test_dedup_same_user_folder_across_candidates_counts_once():
+    resp = make_response("alice", [make_flac("Album", 1)])
+    # Same response for primary and every fallback text.
+    gateway = FakeGateway(completes_on=1, responses=[resp])
+    service = SearchService(gateway, FakeStore(), FakeClock(), min_results=99)
+    releases = service.search(SearchQuery(artist="A", album="B"))
+    assert len(releases) == 1  # deduped on (username, album_folder)
+    assert len(gateway.started_searches) >= 2  # walked candidates (never reached 99)

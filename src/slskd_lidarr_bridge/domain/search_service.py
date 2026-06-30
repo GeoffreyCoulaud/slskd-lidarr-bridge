@@ -7,9 +7,15 @@ import datetime
 import logging
 from collections import defaultdict
 
-from slskd_lidarr_bridge.domain.models import AudioFile, Release, SearchQuery
+from slskd_lidarr_bridge.domain.models import (
+    AudioFile,
+    Release,
+    SearchQuery,
+    SearchResponse,
+)
 from slskd_lidarr_bridge.domain.ports import Clock, ReleaseStore, SoulseekGateway
 from slskd_lidarr_bridge.domain.quality import detect_quality
+from slskd_lidarr_bridge.domain.query_candidates import generate_candidates
 from slskd_lidarr_bridge.domain.titles import build_title
 
 logger = logging.getLogger(__name__)
@@ -26,6 +32,8 @@ class SearchService:
         poll_interval: float = 1.0,
         min_bitrate: int | None = None,
         release_ttl_days: int = 7,
+        min_results: int = 3,
+        search_budget: int = 75,
     ) -> None:
         self._gateway = gateway
         self._store = store
@@ -34,6 +42,8 @@ class SearchService:
         self._poll_interval = poll_interval
         self._min_bitrate = min_bitrate
         self._release_ttl_days = release_ttl_days
+        self._min_results = min_results
+        self._search_budget = search_budget
 
     def search(self, query: SearchQuery) -> list[Release]:
         if query.is_empty:
@@ -43,28 +53,53 @@ class SearchService:
             self._clock.now() - datetime.timedelta(days=self._release_ttl_days)
         )
 
-        sid = self._gateway.start_search(query.to_search_text())
+        candidates = generate_candidates(query)
+        seen: set[tuple[str, str]] = set()
+        # (has_free_upload_slot, upload_speed, queue_length, release) — for sorting.
+        tagged: list[tuple[bool, int, int, Release]] = []
+        start = self._clock.now()
 
-        # Poll until complete or timeout.
+        for index, text in enumerate(candidates):
+            if index > 0:
+                if len(seen) >= self._min_results:
+                    break
+                elapsed = (self._clock.now() - start).total_seconds()
+                if elapsed >= self._search_budget:
+                    break
+                remaining = self._search_budget - elapsed
+                max_seconds = min(float(self._search_timeout), max(remaining, 0.0))
+            else:
+                max_seconds = float(self._search_timeout)
+
+            responses = self._run_search(text, max_seconds)
+            self._collect(responses, seen, tagged)
+
+        # Order by (free slot desc, upload speed desc, queue length asc).
+        tagged.sort(key=lambda x: (x[0], x[1], -x[2]), reverse=True)
+        return [r for *_, r in tagged]
+
+    def _run_search(self, text: str, max_seconds: float) -> list[SearchResponse]:
+        sid = self._gateway.start_search(text)
         start = self._clock.now()
         while not self._gateway.search_is_complete(sid):
             elapsed = (self._clock.now() - start).total_seconds()
-            if elapsed >= self._search_timeout:
+            if elapsed >= max_seconds:
                 logger.warning(
                     "Search %r timed out after %ss; returning partial results",
-                    query.to_search_text(),
-                    self._search_timeout,
+                    text,
+                    max_seconds,
                 )
                 break
             self._clock.sleep(self._poll_interval)
+        return self._gateway.search_responses(sid)
 
-        responses = self._gateway.search_responses(sid)
-
-        # (has_free_upload_slot, upload_speed, queue_length, release) — for sorting.
-        tagged: list[tuple[bool, int, int, Release]] = []
-
+    def _collect(
+        self,
+        responses: list[SearchResponse],
+        seen: set[tuple[str, str]],
+        tagged: list[tuple[bool, int, int, Release]],
+    ) -> None:
         for response in responses:
-            # Keep only audio files, filtered by min_bitrate when set.
             audio: list[AudioFile] = [
                 f
                 for f in response.files
@@ -78,36 +113,25 @@ class SearchService:
             if not audio:
                 continue
 
-            # Group filtered files by album folder.
             groups: dict[str, list[AudioFile]] = defaultdict(list)
             for f in audio:
                 groups[f.album_folder].append(f)
 
             for folder, files in groups.items():
-                # Derive artist / album from the real remote folder layout, not
-                # the query, so each result reflects what will actually be
-                # downloaded. Lidarr re-parses the title and only keeps results
-                # whose artist/album resolve to the search; reporting the real
-                # artist lets it reject a same-named album by a *different*
-                # artist (e.g. Alice/HelloWorld when Bob/HelloWorld was searched)
-                # instead of mislabelling it as the searched artist.
+                key = (response.username, folder)
+                if key in seen:
+                    continue
+
                 if " - " in folder:
-                    # Combined "Artist - Album" folder.
                     left, right = folder.split(" - ", 1)
                     artist, album = left.strip(), right.strip()
                 else:
-                    # Plain album folder: the artist is its parent folder
-                    # (grandparent of the files); empty when the layout is too
-                    # flat to tell, in which case Lidarr drops the unidentifiable
-                    # result rather than attributing it to the searched artist.
                     album = folder
                     artist = files[0].artist_folder
 
                 size = sum(f.size for f in files)
                 quality = detect_quality(files)
                 title = build_title(artist, album, quality, response.username)
-                created_at = self._clock.now()
-
                 release = Release(
                     artist=artist,
                     album=album,
@@ -117,10 +141,11 @@ class SearchService:
                     size=size,
                     album_folder=folder,
                     quality=quality,
-                    created_at=created_at,
+                    created_at=self._clock.now(),
                 )
                 release_id = self._store.put(release)
                 release = dataclasses.replace(release, id=release_id)
+                seen.add(key)
                 tagged.append(
                     (
                         response.has_free_upload_slot,
@@ -129,9 +154,3 @@ class SearchService:
                         release,
                     )
                 )
-
-        # Order by (free slot desc, upload speed desc, queue length asc). The
-        # queue length is negated so that a single reverse=True sort yields a
-        # *shorter* queue first among peers that tie on slot and speed.
-        tagged.sort(key=lambda x: (x[0], x[1], -x[2]), reverse=True)
-        return [r for *_, r in tagged]
