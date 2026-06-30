@@ -1,0 +1,152 @@
+[
+  {
+    "artist": "All India Radio",
+    "album": "All India Radio (Expanded Edition)",
+    "mbid": "c37b92ad-6f14-42dc-8a37-a2ce79c42a9e",
+    "canonical": "All India Radio"
+  },
+  {
+    "artist": "Avril Lavigne",
+    "album": "The Best Damn Thing (Deluxe Edition)",
+    "mbid": "d336028d-5a6b-3249-a836-b4adbf670c6f",
+    "canonical": "The Best Damn Thing"
+  },
+  {
+    "artist": "Bill Burr",
+    "album": "Emotionally Unavailable (expanded edition)",
+    "mbid": "3ed1e69f-c370-48bb-abdd-76963fc5b7b6",
+    "canonical": "Emotionally Unavailable"
+  },
+  {
+    "artist": "Black",
+    "album": "Wonderful Life (expanded edition)",
+    "mbid": "704faa1d-f5fd-4d5e-b884-66a1709b967e",
+    "canonical": "Wonderful Life"
+  },
+  {
+    "artist": "Bruce Dickinson",
+    "album": "Balls to Picasso (expanded edition)",
+    "mbid": "9f5dbdac-f1c3-42ed-90b9-0674c552a376",
+    "canonical": "Balls to Picasso"
+  },
+  {
+    "artist": "Golden Earring",
+    "album": "Something Heavy Going Down: Live From the Twilight Zone (Remastered)",
+    "mbid": "54f5fb5b-d271-46f8-a0b7-20833a0c55eb",
+    "canonical": "Something Heavy Going Down: Live From the Twilight Zone"
+  },
+  {
+    "artist": "Gregorian",
+    "album": "Winter Chants (deluxe edition)",
+    "mbid": "fd22e671-5666-49fa-bf7e-1bae7fc3fb4b",
+    "canonical": "Winter Chants"
+  },
+  {
+    "artist": "Head Machine",
+    "album": "Orgasm (Remastered)",
+    "mbid": "47b26b1c-ae42-3250-aa86-21e6eb53fc65",
+    "canonical": "Orgasm"
+  },
+  {
+    "artist": "Helloween",
+    "album": "When the Sinner (Remastered)",
+    "mbid": "2480621d-d8c0-46d0-bbac-f60a5f3048b4",
+    "canonical": "When the Sinner"
+  },
+  {
+    "artist": "J. Karjalainen",
+    "album": "Suurimmat hitit (remastered)",
+    "mbid": "4a052c24-c8ea-4943-bef4-fc394c94f7dd",
+    "canonical": "Suurimmat hitit"
+  },
+  {
+    "artist": "Janis Joplin",
+    "album": "18 Essential Songs (Remastered)",
+    "mbid": "4fab8af6-95fd-461f-82b7-f40da90180ed",
+    "canonical": "18 Essential Songs"
+  },
+  {
+    "artist": "Joe Jackson",
+    "album": "Night and Day (remastered)",
+    "mbid": "2b4afb64-bcc9-3d30-ab8b-d9f78558cdee",
+    "canonical": "Night and Day"
+  },
+  {
+    "artist": "Johnny Cash",
+    "album": "Ring of Fire: The Legend of Johnny Cash (Remastered)",
+    "mbid": "2920250d-7653-4848-a23c-772bc09b09b5",
+    "canonical": "Ring of Fire: The Legend of Johnny Cash"
+  },
+  {
+    "artist": "Kaiser Chiefs",
+    "album": "Oh My God (Deluxe Edition)",
+    "mbid": "a49e578b-4178-44f8-b7cf-071bf50be076",
+    "canonical": "Oh My God"
+  },
+  {
+    "artist": "Lerner",
+    "album": "My Fair Lady (remastered)",
+    "mbid": "ee175bda-3524-41b8-8146-5efc8f09f795",
+    "canonical": "My Fair Lady"
+  },
+  {
+    "artist": "Marvin Gaye",
+    "album": "Let’s Get It On (deluxe edition)",
+    "mbid": "22a4d08e-c941-43ea-845c-3ec177665984",
+    "canonical": "Let’s Get It On"
+  },
+  {
+    "artist": "Moonsorrow",
+    "album": "Suden uni (Remastered)",
+    "mbid": "c7cc8bfa-f0b9-4cc5-8258-b6667cde5a6c",
+    "canonical": "Suden uni"
+  },
+  {
+    "artist": "Olly Murs",
+    "album": "Never Been Better (deluxe edition)",
+    "mbid": "455ea07a-3b86-4d49-996a-a8d59403d196",
+    "canonical": "Never Been Better"
+  },
+  {
+    "artist": "The Damned",
+    "album": "Strawberries (deluxe edition)",
+    "mbid": "b14ac083-362c-4700-b38e-2da9cfb43243",
+    "canonical": "Strawberries"
+  },
+  {
+    "artist": "The Stooges",
+    "album": "The Stooges (deluxe edition)",
+    "mbid": "17426aef-4e9b-414c-95e7-36b20eac89c0",
+    "canonical": "The Stooges"
+  },
+  {
+    "artist": "Tyrannosaurus Rex",
+    "album": "Prophets, Seers & Sages: The Angels of the Ages (Expanded Edition)",
+    "mbid": "c4371e67-5fc4-492d-8edd-b689e8ed08dc",
+    "canonical": "Prophets, Seers & Sages: The Angels of the Ages"
+  },
+  {
+    "artist": "Térez Montcalm",
+    "album": "I Know I'll Be Alright (Deluxe edition)",
+    "mbid": "5c6d6935-4cae-43eb-abc7-07901c10dd27",
+    "canonical": "I Know I'll Be Alright"
+  },
+  {
+    "artist": "Unearth",
+    "album": "Watchers of Rule (deluxe edition)",
+    "mbid": "aaab70cd-3edc-455d-af7e-8bff53b609d1",
+    "canonical": "Watchers of Rule"
+  },
+  {
+    "artist": "Van der Graaf Generator",
+    "album": "Still Life (remastered)",
+    "mbid": "2646071f-0555-479e-88db-4e913dd078fb",
+    "canonical": "Still Life"
+  },
+  {
+    "artist": "W.A.S.T.E.",
+    "album": "This Is What We Seek (deluxe edition)",
+    "mbid": "2594f51f-b656-4efa-8021-9d4c457a7a3a",
+    "canonical": "This Is What We Seek"
+  }
+]
