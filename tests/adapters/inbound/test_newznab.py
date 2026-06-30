@@ -72,6 +72,7 @@ def _make_app(
     search_service=None,
     release_store=None,
     categories=None,
+    api_key=None,
 ) -> flask.Flask:
     if search_service is None:
         search_service = FakeSearchService()
@@ -81,7 +82,9 @@ def _make_app(
         categories = [(3000, "Audio"), (3010, "Audio/MP3"), (3040, "Audio/Lossless")]
 
     app = flask.Flask(__name__)
-    bp = create_newznab_blueprint(search_service, release_store, categories=categories)
+    bp = create_newznab_blueprint(
+        search_service, release_store, categories=categories, api_key=api_key
+    )
     app.register_blueprint(bp)
     return app
 
@@ -351,3 +354,165 @@ class TestNzbRoute:
         cd = resp.headers.get("Content-Disposition", "")
         assert "attachment" in cd
         assert "test-id-001.nzb" in cd
+
+
+# ---------------------------------------------------------------------------
+# Tests: API key authentication
+# ---------------------------------------------------------------------------
+
+
+class TestApiKeyAuth:
+    KEY = "s3cr3t"
+
+    def _make_keyed_app(
+        self,
+        search_service=None,
+        release_store=None,
+    ) -> flask.Flask:
+        return _make_app(
+            search_service=search_service,
+            release_store=release_store,
+            categories=[(3000, "Audio"), (3040, "Audio/Lossless")],
+            api_key=self.KEY,
+        )
+
+    # -- No-key regression: all requests pass without apikey param --
+
+    def test_no_key_caps_needs_no_apikey(self):
+        client = _make_app().test_client()
+        resp = client.get("/indexer/api?t=caps")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag != "error"
+
+    def test_no_key_nzb_needs_no_apikey(self):
+        release = _make_release()
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+        client = _make_app(release_store=store).test_client()
+        resp = client.get("/indexer/nzb/test-id-001")
+        assert resp.status_code == 200
+        assert resp.content_type == "application/x-nzb"
+
+    # -- Key set: missing apikey → error 100 at HTTP 200 --
+
+    def test_key_set_missing_apikey_caps_returns_error_100(self):
+        client = self._make_keyed_app().test_client()
+        resp = client.get("/indexer/api?t=caps")
+        assert resp.status_code == 200
+        assert "xml" in resp.content_type
+        root = ET.fromstring(resp.data)
+        assert root.tag == "error"
+        assert root.get("code") == "100"
+
+    def test_key_set_missing_apikey_search_returns_error_100(self):
+        client = self._make_keyed_app().test_client()
+        resp = client.get("/indexer/api?t=music&artist=A&album=B")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "error"
+        assert root.get("code") == "100"
+
+    # -- Key set: wrong apikey → error 100 --
+
+    def test_key_set_wrong_apikey_returns_error_100(self):
+        client = self._make_keyed_app().test_client()
+        resp = client.get("/indexer/api?t=caps&apikey=wrongkey")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "error"
+        assert root.get("code") == "100"
+
+    # -- Key set: correct apikey → normal responses --
+
+    def test_key_set_correct_apikey_caps_returns_caps(self):
+        client = self._make_keyed_app().test_client()
+        resp = client.get(f"/indexer/api?t=caps&apikey={self.KEY}")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "caps"
+
+    def test_key_set_correct_apikey_search_returns_results(self):
+        release = _make_release()
+        svc = FakeSearchService(results=[release])
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+        client = self._make_keyed_app(
+            search_service=svc, release_store=store
+        ).test_client()
+        resp = client.get(f"/indexer/api?t=music&artist=A&album=B&apikey={self.KEY}")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag != "error"
+
+    # -- Enclosure URLs contain apikey when key is set --
+
+    def test_key_set_search_enclosure_url_contains_apikey(self):
+        release = _make_release()
+        svc = FakeSearchService(results=[release])
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+        client = self._make_keyed_app(
+            search_service=svc, release_store=store
+        ).test_client()
+        resp = client.get(f"/indexer/api?t=music&artist=A&album=B&apikey={self.KEY}")
+        root = ET.fromstring(resp.data)
+        enclosures = root.findall(".//enclosure")
+        assert len(enclosures) == 1
+        url = enclosures[0].get("url", "")
+        assert f"apikey={self.KEY}" in url
+
+    def test_key_set_sentinel_url_contains_apikey(self):
+        client = self._make_keyed_app().test_client()
+        resp = client.get(f"/indexer/api?t=music&apikey={self.KEY}")
+        root = ET.fromstring(resp.data)
+        enclosures = root.findall(".//enclosure")
+        assert len(enclosures) == 1
+        url = enclosures[0].get("url", "")
+        assert f"apikey={self.KEY}" in url
+
+    def test_no_key_enclosure_url_has_no_apikey(self):
+        release = _make_release()
+        svc = FakeSearchService(results=[release])
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+        client = _make_app(search_service=svc, release_store=store).test_client()
+        resp = client.get("/indexer/api?t=music&artist=A&album=B")
+        root = ET.fromstring(resp.data)
+        enclosures = root.findall(".//enclosure")
+        assert len(enclosures) == 1
+        url = enclosures[0].get("url", "")
+        assert "apikey=" not in url
+
+    # -- NZB route: key set → accepts correct apikey, rejects missing/wrong --
+
+    def test_key_set_nzb_route_accepts_correct_key(self):
+        release = _make_release()
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+        client = self._make_keyed_app(release_store=store).test_client()
+        resp = client.get(f"/indexer/nzb/test-id-001?apikey={self.KEY}")
+        assert resp.status_code == 200
+        assert resp.content_type == "application/x-nzb"
+
+    def test_key_set_nzb_route_rejects_missing_key(self):
+        release = _make_release()
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+        client = self._make_keyed_app(release_store=store).test_client()
+        resp = client.get("/indexer/nzb/test-id-001")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "error"
+        assert root.get("code") == "100"
+
+    def test_key_set_nzb_route_rejects_wrong_key(self):
+        release = _make_release()
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+        client = self._make_keyed_app(release_store=store).test_client()
+        resp = client.get("/indexer/nzb/test-id-001?apikey=badkey")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "error"
+        assert root.get("code") == "100"

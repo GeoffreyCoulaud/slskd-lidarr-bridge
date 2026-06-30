@@ -72,8 +72,9 @@ def create_app(
         search_service,
         release_store,
         categories=config.categories,
+        api_key=config.api_key,
     )
-    sabnzbd_bp = create_sabnzbd_blueprint(download_service)
+    sabnzbd_bp = create_sabnzbd_blueprint(download_service, api_key=config.api_key)
 
     app.register_blueprint(newznab_bp)
     app.register_blueprint(sabnzbd_bp)

@@ -120,6 +120,31 @@ def test_invalid_log_level_raises():
 
 
 # ---------------------------------------------------------------------------
+# BRIDGE_API_KEY
+# ---------------------------------------------------------------------------
+
+
+def test_api_key_absent_defaults_to_none():
+    cfg = Config.from_env(REQUIRED)
+    assert cfg.api_key is None
+
+
+def test_api_key_set():
+    cfg = Config.from_env({**REQUIRED, "BRIDGE_API_KEY": "mysecret"})
+    assert cfg.api_key == "mysecret"
+
+
+def test_api_key_empty_string_is_none():
+    cfg = Config.from_env({**REQUIRED, "BRIDGE_API_KEY": ""})
+    assert cfg.api_key is None
+
+
+def test_api_key_whitespace_is_none():
+    cfg = Config.from_env({**REQUIRED, "BRIDGE_API_KEY": "   "})
+    assert cfg.api_key is None
+
+
+# ---------------------------------------------------------------------------
 # Immutability
 # ---------------------------------------------------------------------------
 

@@ -53,6 +53,10 @@ class Config:
     search_budget:
         Wall-clock seconds gating fallback candidates (the primary always runs);
         kept under Lidarr's hardcoded 100 s indexer-request abort. Defaults to 75.
+    api_key:
+        Optional shared key for the Newznab and SABnzbd surfaces
+        (``BRIDGE_API_KEY``). ``None`` means no authentication required.
+        Empty / whitespace values are normalised to ``None``.
     """
 
     slskd_url: str
@@ -67,6 +71,7 @@ class Config:
     log_level: str
     min_results: int
     search_budget: int
+    api_key: str | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -91,6 +96,9 @@ class Config:
                 f"Invalid LOG_LEVEL {log_level!r}; expected one of {valid}"
             )
 
+        raw_api_key = env.get("BRIDGE_API_KEY", "")
+        api_key = raw_api_key.strip() or None
+
         return cls(
             slskd_url=env["SLSKD_URL"],
             slskd_api_key=env["SLSKD_API_KEY"],
@@ -104,4 +112,5 @@ class Config:
             log_level=log_level,
             min_results=int(env.get("BRIDGE_MIN_RESULTS", "3")),
             search_budget=int(env.get("BRIDGE_SEARCH_BUDGET", "75")),
+            api_key=api_key,
         )
