@@ -458,6 +458,31 @@ def test_flat_folder_yields_empty_artist():
     assert releases[0].album == "HelloWorld"
 
 
+def test_flat_combined_artist_album_folder_splits_on_dash():
+    """A flat layout whose only folder is 'Artist - Album' (no separate artist
+    folder above it) still yields the real artist via the ' - ' split, so Lidarr
+    can match it. The split takes precedence over the (here useless) grandparent.
+    """
+    f = AudioFile(
+        filename=r"@@peer\Bob - HelloWorld\01.flac",
+        size=10_000_000,
+        extension=".flac",
+    )
+    response = make_response("peer", [f])
+    gateway = FakeGateway(completes_on=1, responses=[response])
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock)
+
+    releases = service.search(SearchQuery(artist="Bob", album="HelloWorld"))
+
+    assert len(releases) == 1
+    r = releases[0]
+    assert r.artist == "Bob"
+    assert r.album == "HelloWorld"
+    assert r.title.startswith("Bob - HelloWorld [FLAC]")
+
+
 # ---------------------------------------------------------------------------
 # Tests — release retention (purge_older_than)
 # ---------------------------------------------------------------------------
