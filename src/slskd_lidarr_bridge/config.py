@@ -13,7 +13,7 @@ _DEFAULT_CATEGORIES: list[tuple[int, str]] = [
     (3040, "Audio/Lossless"),
 ]
 
-_REQUIRED_VARS = ("SLSKD_URL", "SLSKD_API_KEY", "SLSKD_DOWNLOADS_DIR")
+_REQUIRED_VARS = ("SLSKD_URL", "SLSKD_API_KEY")
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,6 @@ class Config:
         Base URL of the slskd instance (required).
     slskd_api_key:
         API key for slskd authentication (required).
-    slskd_downloads_dir:
-        Absolute path to slskd's downloads directory on disk (required).
     categories:
         Newznab indexer category tuples ``(id, name)`` exposed by the bridge.
         Fixed set — not user-configurable.
@@ -43,7 +41,6 @@ class Config:
 
     slskd_url: str
     slskd_api_key: str
-    slskd_downloads_dir: str
     categories: list[tuple[int, str]]
     bridge_port: int
     search_timeout: int
@@ -69,7 +66,6 @@ class Config:
         return cls(
             slskd_url=env["SLSKD_URL"],
             slskd_api_key=env["SLSKD_API_KEY"],
-            slskd_downloads_dir=env["SLSKD_DOWNLOADS_DIR"],
             categories=list(_DEFAULT_CATEGORIES),
             bridge_port=int(env.get("BRIDGE_PORT", "8765")),
             search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "30")),

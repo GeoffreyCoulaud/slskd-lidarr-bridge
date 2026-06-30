@@ -42,6 +42,9 @@ class _StubSoulseekGateway:
     def cancel(self, username: str, transfer_id: str) -> None:
         pass
 
+    def downloads_directory(self) -> str:
+        return "/downloads"
+
 
 def test_soulseek_gateway_is_runtime_checkable():
     assert isinstance(_StubSoulseekGateway(), SoulseekGateway)

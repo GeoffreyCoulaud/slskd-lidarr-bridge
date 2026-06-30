@@ -363,3 +363,40 @@ def test_start_search_raises_on_500():
     gw, _ = make_gateway()
     with pytest.raises(httpx.HTTPStatusError):
         gw.start_search("some query")
+
+
+# ---------------------------------------------------------------------------
+# downloads_directory
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_downloads_directory_reads_options_and_caches():
+    """Reads directories.downloads from GET /options, then caches the result."""
+    route = respx.get(f"{BASE_URL}/api/v0/options").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "directories": {
+                    "downloads": "/data/downloads/complete",
+                    "incomplete": "/data/downloads/incomplete",
+                },
+            },
+        )
+    )
+    gw, _ = make_gateway()
+
+    assert gw.downloads_directory() == "/data/downloads/complete"
+    # Cached — a second call must not hit slskd again.
+    assert gw.downloads_directory() == "/data/downloads/complete"
+    assert route.call_count == 1
+    assert route.calls.last.request.headers["x-api-key"] == API_KEY
+
+
+@respx.mock
+def test_downloads_directory_raises_on_500():
+    """A 500 from slskd must propagate as httpx.HTTPStatusError."""
+    respx.get(f"{BASE_URL}/api/v0/options").mock(return_value=httpx.Response(500))
+    gw, _ = make_gateway()
+    with pytest.raises(httpx.HTTPStatusError):
+        gw.downloads_directory()

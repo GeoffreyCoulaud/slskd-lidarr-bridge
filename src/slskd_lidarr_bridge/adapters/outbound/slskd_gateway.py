@@ -66,6 +66,7 @@ class SlskdGateway:
             # Merge the auth header onto an injected client (e.g. in tests).
             client.headers["X-API-Key"] = api_key
             self._client = client
+        self._downloads_directory: str | None = None
 
     # ------------------------------------------------------------------
     # SoulseekGateway implementation
@@ -154,3 +155,17 @@ class SlskdGateway:
             params={"remove": "true"},
         )
         r.raise_for_status()
+
+    def downloads_directory(self) -> str:
+        """Return slskd's completed-downloads dir (its ``directories.downloads``).
+
+        Read from ``GET /api/v0/options`` — slskd is the source of truth for
+        where completed files land, so the bridge needs no path config of its
+        own. Cached after the first successful fetch: slskd requires a restart
+        to change this value, so it is stable for the process lifetime.
+        """
+        if self._downloads_directory is None:
+            r = self._client.get("/api/v0/options")
+            r.raise_for_status()
+            self._downloads_directory = str(r.json()["directories"]["downloads"])
+        return self._downloads_directory

@@ -18,7 +18,6 @@ class TestBuildApp:
         env = {
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
-            "SLSKD_DOWNLOADS_DIR": "/downloads",
             "BRIDGE_DB_PATH": db_path,
         }
         app = build_app(env)
@@ -32,7 +31,6 @@ class TestBuildApp:
         env = {
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
-            "SLSKD_DOWNLOADS_DIR": "/downloads",
             "BRIDGE_DB_PATH": db_path,
         }
         app = build_app(env)
@@ -46,7 +44,6 @@ class TestBuildApp:
         env = {
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
-            "SLSKD_DOWNLOADS_DIR": "/downloads",
             "BRIDGE_DB_PATH": db_path,
         }
         app = build_app(env)
@@ -71,7 +68,6 @@ class TestMain:
     def _set_env(self, monkeypatch, tmp_path, port="9999"):
         monkeypatch.setenv("SLSKD_URL", "http://localhost:5030")
         monkeypatch.setenv("SLSKD_API_KEY", "test-key")
-        monkeypatch.setenv("SLSKD_DOWNLOADS_DIR", "/downloads")
         monkeypatch.setenv("BRIDGE_DB_PATH", str(tmp_path / "bridge.db"))
         monkeypatch.setenv("BRIDGE_PORT", port)
 

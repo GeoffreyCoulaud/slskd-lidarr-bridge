@@ -57,7 +57,6 @@ def create_app(
         gateway,
         job_store,
         clock,
-        downloads_dir=config.slskd_downloads_dir,
     )
 
     newznab_bp = create_newznab_blueprint(
@@ -65,10 +64,7 @@ def create_app(
         release_store,
         categories=config.categories,
     )
-    sabnzbd_bp = create_sabnzbd_blueprint(
-        download_service,
-        complete_dir=config.slskd_downloads_dir,
-    )
+    sabnzbd_bp = create_sabnzbd_blueprint(download_service)
 
     app.register_blueprint(newznab_bp)
     app.register_blueprint(sabnzbd_bp)
