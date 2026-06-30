@@ -72,7 +72,6 @@ In Lidarr: **Settings → Indexers → Add → Newznab**
 |---|---|
 | Name | slskd (or any label) |
 | URL | `http://bridge:8765/indexer` |
-| API Path | `/api` |
 | API Key | _(leave blank, the bridge does not require one)_ |
 | Download Client | the **slskd-bridge** client from step 1 — under the **Show Advanced** toggle |
 
