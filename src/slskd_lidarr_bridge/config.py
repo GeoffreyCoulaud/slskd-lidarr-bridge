@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -37,6 +38,9 @@ class Config:
         Path to the SQLite database file (default ``/data/bridge.db``).
     min_bitrate:
         Minimum acceptable bitrate in kbps; ``None`` means no filter.
+    log_level:
+        Root logging level name (e.g. ``INFO``, ``DEBUG``). Always a valid,
+        upper-cased ``logging`` level name; defaults to ``INFO``.
     """
 
     slskd_url: str
@@ -46,6 +50,7 @@ class Config:
     search_timeout: int
     db_path: str
     min_bitrate: int | None
+    log_level: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -63,6 +68,13 @@ class Config:
         raw_min_bitrate = env.get("BRIDGE_MIN_BITRATE", "")
         min_bitrate = int(raw_min_bitrate) if raw_min_bitrate.strip() else None
 
+        log_level = env.get("LOG_LEVEL", "").strip().upper() or "INFO"
+        if log_level not in logging.getLevelNamesMapping():
+            valid = ", ".join(sorted(logging.getLevelNamesMapping()))
+            raise ValueError(
+                f"Invalid LOG_LEVEL {log_level!r}; expected one of {valid}"
+            )
+
         return cls(
             slskd_url=env["SLSKD_URL"],
             slskd_api_key=env["SLSKD_API_KEY"],
@@ -71,4 +83,5 @@ class Config:
             search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "30")),
             db_path=env.get("BRIDGE_DB_PATH", "/data/bridge.db"),
             min_bitrate=min_bitrate,
+            log_level=log_level,
         )

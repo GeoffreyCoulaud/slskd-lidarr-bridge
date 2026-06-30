@@ -102,3 +102,37 @@ class TestMain:
 
         assert len(calls) == 1
         assert calls[0][1]["port"] == 8123
+
+
+class TestLoggingSetup:
+    """``main()`` configures logging from the environment before serving."""
+
+    def _set_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("SLSKD_URL", "http://localhost:5030")
+        monkeypatch.setenv("SLSKD_API_KEY", "test-key")
+        monkeypatch.setenv("BRIDGE_DB_PATH", str(tmp_path / "bridge.db"))
+
+    def test_main_configures_logging_with_default_info(self, monkeypatch, tmp_path):
+        self._set_env(monkeypatch, tmp_path)
+        recorded: list[str] = []
+        monkeypatch.setattr(
+            main_module, "configure_logging", lambda level: recorded.append(level)
+        )
+        monkeypatch.setattr(waitress, "serve", lambda app, **kw: None)
+
+        main_module.main()
+
+        assert recorded == ["INFO"]
+
+    def test_main_configures_logging_from_log_level_env(self, monkeypatch, tmp_path):
+        self._set_env(monkeypatch, tmp_path)
+        monkeypatch.setenv("LOG_LEVEL", "debug")
+        recorded: list[str] = []
+        monkeypatch.setattr(
+            main_module, "configure_logging", lambda level: recorded.append(level)
+        )
+        monkeypatch.setattr(waitress, "serve", lambda app, **kw: None)
+
+        main_module.main()
+
+        assert recorded == ["DEBUG"]

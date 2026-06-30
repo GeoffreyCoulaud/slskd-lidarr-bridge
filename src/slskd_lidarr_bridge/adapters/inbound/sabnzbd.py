@@ -7,10 +7,14 @@ Exposes:
 
 from __future__ import annotations
 
+import logging
+
 from flask import Blueprint, Response, jsonify, request
 
 from slskd_lidarr_bridge.adapters.inbound.nzb import parse_nzb
 from slskd_lidarr_bridge.domain.download_service import DownloadService
+
+logger = logging.getLogger(__name__)
 
 # The bridge only ever handles music; the SABnzbd shim advertises a single,
 # fixed category to Lidarr.
@@ -80,6 +84,12 @@ def create_sabnzbd_blueprint(
             # tracks and imports items whose category matches its configured one.
             category = _get_param("cat") or ""
             nzo_id = download_service.start(payload, category)
+            logger.info(
+                "Enqueued download %s: %r (cat=%r)",
+                nzo_id,
+                payload["title"],
+                category,
+            )
             return jsonify({"status": True, "nzo_ids": [nzo_id]})
 
         if mode == "queue":

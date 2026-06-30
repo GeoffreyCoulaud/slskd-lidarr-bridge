@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 
@@ -201,6 +202,22 @@ class TestMusicSearch:
         attrs = root.findall(f".//{{{NEWZNAB_NS}}}attr[@name='category']")
         assert len(attrs) == 1
         assert attrs[0].get("value") == "3010"
+
+    def test_music_search_logs_result_count(self, caplog):
+        release = _make_release()
+        svc = FakeSearchService(results=[release])
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+
+        client = _make_app(search_service=svc, release_store=store).test_client()
+        with caplog.at_level(logging.INFO):
+            client.get("/indexer/api?t=music&artist=A&album=B")
+
+        assert any(
+            r.levelno == logging.INFO and "1 releases" in r.getMessage()
+            for r in caplog.records
+            if "newznab" in r.name
+        )
 
     def test_music_search_category_default(self):
         release = _make_release(quality="OGG-320")

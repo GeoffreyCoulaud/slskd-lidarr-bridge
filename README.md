@@ -14,6 +14,7 @@ A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Sou
 | `SLSKD_SEARCH_TIMEOUT` | no | `30` | Seconds to wait for a slskd search to complete |
 | `BRIDGE_DB_PATH` | no | `/data/bridge.db` | Path to the SQLite database file |
 | `BRIDGE_MIN_BITRATE` | no | _(none)_ | Minimum acceptable bitrate in kbps; results below this are filtered out |
+| `LOG_LEVEL` | no | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); applies to the bridge and its dependencies (e.g. httpx) |
 
 > **slskd API key role:** create the key in slskd with the **`readwrite`** role — the bridge issues reads (search, status) and writes (enqueue/cancel downloads). As of slskd `0.25.x` the endpoints the bridge calls only require an authenticated key (the `Any` policy — no specific role is enforced yet), so any role technically works, but `readwrite` is the correct, future-proof choice for a client that writes.
 

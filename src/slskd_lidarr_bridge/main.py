@@ -8,6 +8,7 @@ builds the gateway, constructs the Flask app via create_app.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 
@@ -18,6 +19,9 @@ from slskd_lidarr_bridge.adapters.outbound.slskd_gateway import SlskdGateway
 from slskd_lidarr_bridge.adapters.outbound.sqlite_store import open_stores
 from slskd_lidarr_bridge.adapters.outbound.system_clock import SystemClock
 from slskd_lidarr_bridge.config import Config
+from slskd_lidarr_bridge.logging_setup import configure_logging
+
+logger = logging.getLogger(__name__)
 
 
 def build_app(env: Mapping[str, str]) -> Flask:
@@ -48,6 +52,12 @@ def main() -> None:
 
     app = build_app(os.environ)
     config = app.config["BRIDGE_CONFIG"]
+    configure_logging(config.log_level)
+    logger.info(
+        "slskd-lidarr-bridge listening on 0.0.0.0:%s (log level %s)",
+        config.bridge_port,
+        config.log_level,
+    )
     # Bind on all interfaces: the bridge runs in a container, reachable only
     # via the Docker network / published port.
     waitress.serve(app, host="0.0.0.0", port=config.bridge_port)
