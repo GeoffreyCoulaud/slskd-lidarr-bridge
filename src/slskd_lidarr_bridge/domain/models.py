@@ -28,6 +28,21 @@ class AudioFile:
         return ""
 
     @property
+    def artist_folder(self) -> str:
+        """Grandparent directory component — the folder above the album folder.
+
+        Empty string when the path is too flat to have a folder above the album
+        folder (e.g. ``Album/track.flac`` or a bare filename). By the common
+        ``Artist/Album/track`` layout this is the artist.
+        """
+        normalized = self.filename.replace("\\", "/")
+        parts = normalized.split("/")
+        # parts[-1] file, parts[-2] album folder, parts[-3] artist folder
+        if len(parts) >= 3:
+            return parts[-3]
+        return ""
+
+    @property
     def is_audio(self) -> bool:
         """True if extension is in AUDIO_EXTENSIONS (case-insensitive)."""
         if self.extension is None:
