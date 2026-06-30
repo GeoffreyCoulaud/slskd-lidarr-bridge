@@ -35,6 +35,9 @@ class FakeGateway:
     def cancel(self, username: str, transfer_id: str) -> None:
         pass
 
+    def downloads_directory(self) -> str:
+        return "/downloads"
+
 
 class FakeReleaseStore:
     def put(self, release) -> str:
@@ -90,6 +93,9 @@ class ExplodingGateway:
     def cancel(self, username: str, transfer_id: str) -> None:
         pass
 
+    def downloads_directory(self) -> str:
+        return "/downloads"
+
 
 class FakeJobStoreWithOneJob:
     """Job store that returns a single job so statuses() calls transfers()."""
@@ -127,7 +133,6 @@ def _make_config(**overrides) -> Config:
     defaults: dict = dict(
         slskd_url="http://slskd:5030",
         slskd_api_key="key",
-        slskd_downloads_dir="/downloads",
         categories=[(3000, "Audio"), (3040, "Audio/Lossless")],
         bridge_port=8765,
         search_timeout=30,

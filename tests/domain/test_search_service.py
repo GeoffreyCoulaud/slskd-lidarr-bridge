@@ -51,6 +51,8 @@ class FakeGateway:
         return []
 
     def cancel(self, username: str, transfer_id: str) -> None: ...
+    def downloads_directory(self) -> str:
+        return "/downloads"
 
 
 class FakeStore:

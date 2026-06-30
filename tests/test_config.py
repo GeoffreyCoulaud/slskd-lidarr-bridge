@@ -11,7 +11,6 @@ from slskd_lidarr_bridge.config import Config
 REQUIRED = {
     "SLSKD_URL": "http://slskd:5030",
     "SLSKD_API_KEY": "secret-key",
-    "SLSKD_DOWNLOADS_DIR": "/downloads",
 }
 
 
@@ -32,7 +31,6 @@ def test_full_env_parses_all_fields():
 
     assert cfg.slskd_url == "http://slskd:5030"
     assert cfg.slskd_api_key == "secret-key"
-    assert cfg.slskd_downloads_dir == "/downloads"
     assert cfg.bridge_port == 9000
     assert isinstance(cfg.bridge_port, int)
     assert cfg.search_timeout == 60
@@ -82,13 +80,6 @@ def test_missing_slskd_api_key_raises():
     with pytest.raises((SystemExit, ValueError)) as exc_info:
         Config.from_env(env)
     assert "SLSKD_API_KEY" in str(exc_info.value)
-
-
-def test_missing_slskd_downloads_dir_raises():
-    env = {k: v for k, v in REQUIRED.items() if k != "SLSKD_DOWNLOADS_DIR"}
-    with pytest.raises((SystemExit, ValueError)) as exc_info:
-        Config.from_env(env)
-    assert "SLSKD_DOWNLOADS_DIR" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

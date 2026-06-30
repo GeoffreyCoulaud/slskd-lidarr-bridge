@@ -58,11 +58,15 @@ _FILES = [
 class FakeGateway:
     """Stateful fake SoulseekGateway for e2e tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, downloads_dir: str) -> None:
+        self._downloads_dir = downloads_dir
         self._enqueued: list[tuple[str, list[AudioFile]]] = []
         self._cancelled: list[tuple[str, str]] = []
         # Start in-progress; flip to True to simulate completion.
         self.transfers_complete: bool = False
+
+    def downloads_directory(self) -> str:
+        return self._downloads_dir
 
     def start_search(self, text: str) -> str:
         return "fake-search-id-001"
@@ -147,8 +151,8 @@ def downloads_dir(tmp_path):
 
 
 @pytest.fixture()
-def gateway():
-    return FakeGateway()
+def gateway(downloads_dir):
+    return FakeGateway(downloads_dir)
 
 
 @pytest.fixture()
@@ -159,7 +163,6 @@ def client(tmp_path, downloads_dir, gateway):
         {
             "SLSKD_URL": "http://slskd:5030",
             "SLSKD_API_KEY": "test-slskd-key",
-            "SLSKD_DOWNLOADS_DIR": downloads_dir,
         }
     )
     app = create_app(config, gateway, release_store, job_store, FakeClock())

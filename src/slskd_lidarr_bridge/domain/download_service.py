@@ -17,13 +17,14 @@ class DownloadService:
         gateway: SoulseekGateway,
         jobs: JobStore,
         clock: Clock,
-        *,
-        downloads_dir: str,
     ) -> None:
         self._gateway = gateway
         self._jobs = jobs
         self._clock = clock
-        self._downloads_dir = downloads_dir
+
+    def completed_dir(self) -> str:
+        """slskd's completed-downloads directory (reported to Lidarr as-is)."""
+        return self._gateway.downloads_directory()
 
     def start(self, payload: dict[str, Any], category: str) -> str:
         """Enqueue files on slskd, persist a DownloadJob, return its nzo_id."""
@@ -77,7 +78,7 @@ class DownloadService:
                     storage = str(PurePosixPath(lp).parent)
                 else:
                     storage = compute_storage_path(
-                        self._downloads_dir, job.files[0].filename
+                        self._gateway.downloads_directory(), job.files[0].filename
                     )
             elif any(t.is_failed for t in matched):
                 state = "failed"

@@ -32,14 +32,12 @@ _CATEGORIES: list[dict[str, str | int]] = [
 
 def create_sabnzbd_blueprint(
     download_service: DownloadService,
-    *,
-    complete_dir: str,
 ) -> Blueprint:
     """Build and return the SABnzbd shim Blueprint.
 
     Args:
-        download_service: implements DownloadService with start/statuses/remove.
-        complete_dir: download completion directory reported to Lidarr.
+        download_service: implements DownloadService with start/statuses/remove
+            and completed_dir() (slskd's completed-downloads directory).
 
     Returns:
         A Flask Blueprint registered at url_prefix="/sabnzbd".
@@ -61,7 +59,7 @@ def create_sabnzbd_blueprint(
             return jsonify(
                 {
                     "config": {
-                        "misc": {"complete_dir": complete_dir},
+                        "misc": {"complete_dir": download_service.completed_dir()},
                         "categories": _CATEGORIES,
                     }
                 }

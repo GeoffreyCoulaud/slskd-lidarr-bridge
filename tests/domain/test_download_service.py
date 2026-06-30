@@ -47,6 +47,9 @@ class FakeGateway:
     def cancel(self, username: str, transfer_id: str) -> None:
         self.cancelled.append((username, transfer_id))
 
+    def downloads_directory(self) -> str:
+        return "/downloads"
+
 
 class FakeJobStore:
     def __init__(self) -> None:
@@ -122,19 +125,21 @@ def make_transfer(
 # ---------------------------------------------------------------------------
 
 
+def test_completed_dir_delegates_to_gateway():
+    """completed_dir() returns slskd's downloads directory from the gateway."""
+    service = DownloadService(FakeGateway(), FakeJobStore(), FakeClock())
+    assert service.completed_dir() == "/downloads"
+
+
 def test_start_returns_nzo_id_with_correct_prefix():
-    service = DownloadService(
-        FakeGateway(), FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(FakeGateway(), FakeJobStore(), FakeClock())
     nzo_id = service.start(SAMPLE_PAYLOAD, "music")
     assert nzo_id.startswith("SABnzbd_nzo_")
 
 
 def test_start_enqueues_files_on_gateway():
     gateway = FakeGateway()
-    service = DownloadService(
-        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
 
     service.start(SAMPLE_PAYLOAD, "music")
 
@@ -149,9 +154,7 @@ def test_start_enqueues_files_on_gateway():
 
 def test_start_persists_download_job():
     jobs = FakeJobStore()
-    service = DownloadService(
-        FakeGateway(), jobs, FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(FakeGateway(), jobs, FakeClock())
 
     nzo_id = service.start(SAMPLE_PAYLOAD, "music")
 
@@ -174,9 +177,7 @@ def test_start_persists_download_job():
 def test_statuses_no_transfers_yet_reports_job_total_size():
     """No transfers from gateway → total_bytes == job.total_size and percent == 0."""
     gateway = FakeGateway(transfers_by_username={})
-    service = DownloadService(
-        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -207,9 +208,7 @@ def test_statuses_downloading_half_done():
             ]
         }
     )
-    service = DownloadService(
-        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -248,9 +247,7 @@ def test_statuses_completed_uses_compute_storage_path():
             ]
         }
     )
-    service = DownloadService(
-        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -283,9 +280,7 @@ def test_statuses_completed_uses_local_path_parent_when_set():
             ]
         }
     )
-    service = DownloadService(
-        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -327,9 +322,7 @@ def test_statuses_partial_match_is_downloading():
             ]
         }
     )
-    service = DownloadService(
-        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
     service.start(payload_3, "music")
 
     views = service.statuses()
@@ -365,9 +358,7 @@ def test_statuses_failed_sets_fail_message():
             ]
         }
     )
-    service = DownloadService(
-        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
     service.start(SAMPLE_PAYLOAD, "music")
 
     views = service.statuses()
@@ -396,7 +387,7 @@ def test_remove_cancels_in_progress_transfers_and_removes_job():
     )
     gateway = FakeGateway(transfers_by_username={"alice": [in_progress, completed]})
     jobs = FakeJobStore()
-    service = DownloadService(gateway, jobs, FakeClock(), downloads_dir="/downloads")
+    service = DownloadService(gateway, jobs, FakeClock())
     nzo_id = service.start(SAMPLE_PAYLOAD, "music")
 
     service.remove(nzo_id)
@@ -410,9 +401,7 @@ def test_remove_cancels_in_progress_transfers_and_removes_job():
 
 def test_remove_unknown_id_is_noop():
     gateway = FakeGateway()
-    service = DownloadService(
-        gateway, FakeJobStore(), FakeClock(), downloads_dir="/downloads"
-    )
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
 
     # Must not raise
     service.remove("SABnzbd_nzo_doesnotexist")

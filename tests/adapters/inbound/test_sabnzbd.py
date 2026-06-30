@@ -16,8 +16,13 @@ from slskd_lidarr_bridge.domain.models import JobStatusView
 
 
 class FakeDownloadService:
-    def __init__(self, statuses: list[JobStatusView] | None = None):
+    def __init__(
+        self,
+        statuses: list[JobStatusView] | None = None,
+        complete_dir: str = "/downloads",
+    ):
         self._statuses = statuses or []
+        self._complete_dir = complete_dir
         self.started: list[tuple[dict, str]] = []
         self.removed: list[str] = []
 
@@ -30,6 +35,9 @@ class FakeDownloadService:
 
     def remove(self, nzo_id: str) -> None:
         self.removed.append(nzo_id)
+
+    def completed_dir(self) -> str:
+        return self._complete_dir
 
 
 def _make_status(
@@ -61,13 +69,10 @@ def _make_app(
     complete_dir: str = "/downloads",
 ) -> flask.Flask:
     if download_service is None:
-        download_service = FakeDownloadService()
+        download_service = FakeDownloadService(complete_dir=complete_dir)
 
     app = flask.Flask(__name__)
-    bp = create_sabnzbd_blueprint(
-        download_service,
-        complete_dir=complete_dir,
-    )
+    bp = create_sabnzbd_blueprint(download_service)
     app.register_blueprint(bp)
     return app
 

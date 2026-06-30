@@ -10,7 +10,6 @@ A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Sou
 |---|---|---|---|
 | `SLSKD_URL` | yes | - | Base URL of the slskd instance (e.g. `http://slskd:5030`) |
 | `SLSKD_API_KEY` | yes | - | API key for slskd authentication |
-| `SLSKD_DOWNLOADS_DIR` | yes | - | Absolute path to slskd's downloads directory (must match Lidarr's view) |
 | `BRIDGE_PORT` | no | `8765` | TCP port for the bridge HTTP server |
 | `SLSKD_SEARCH_TIMEOUT` | no | `30` | Seconds to wait for a slskd search to complete |
 | `BRIDGE_DB_PATH` | no | `/data/bridge.db` | Path to the SQLite database file |
@@ -18,7 +17,7 @@ A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Sou
 
 ## Docker Compose
 
-The bridge and slskd must share the same downloads volume so that file paths reported by slskd are accessible to Lidarr.
+The bridge discovers slskd's completed-downloads directory from slskd's API, so it needs no downloads volume of its own — it only reports paths to Lidarr, it never reads the files. The shared volume is between **slskd and Lidarr** (see [Completed-downloads path](#3-completed-downloads-path) below).
 
 ```yaml
 services:
@@ -34,12 +33,10 @@ services:
     ports:
       - "8765:8765"
     volumes:
-      - downloads:/downloads
       - bridge-data:/data
     environment:
       SLSKD_URL: http://slskd:5030
       SLSKD_API_KEY: your-slskd-api-key
-      SLSKD_DOWNLOADS_DIR: /downloads
     depends_on:
       - slskd
 
@@ -74,11 +71,13 @@ In Lidarr: **Settings → Download Clients → Add → SABnzbd**
 | API Key | _(leave blank, the bridge does not require one)_ |
 | Category | `music` |
 
-### 3. Shared downloads volume
+### 3. Completed-downloads path
 
-`SLSKD_DOWNLOADS_DIR` must be the **same filesystem path** that Lidarr uses when it inspects completed downloads. If Lidarr and the bridge run on different mounts (e.g. Lidarr sees `/media/music/downloads` but the bridge sees `/downloads`), configure a **Remote Path Mapping** in Lidarr under **Settings → Download Clients → Remote Path Mappings** to translate between the two paths.
+The bridge reads slskd's completed-downloads directory (slskd's `directories.downloads`) from slskd's API and reports `<that dir>/<album folder>` to Lidarr as the import path — no path configuration on the bridge.
+
+Lidarr must be able to read that path. If slskd and Lidarr see the downloads on the **same** filesystem path (shared volume), it works as-is. If they differ (e.g. slskd writes to `/downloads` but Lidarr sees `/media/music/downloads`), add a **Remote Path Mapping** in Lidarr under **Settings → Download Clients → Remote Path Mappings**: set *Host* to the bridge's host and *Remote Path* to slskd's path, *Local Path* to Lidarr's path. This is the standard download-client mechanism — slskd's path is the source of truth, Lidarr translates it.
 
 ## Limitations
 
 - **Multi-disc albums are not supported.** Through the latest slskd release (`0.25.1`, as of June 2026), slskd always writes a download to `<downloads>/<immediate parent folder>/` and exposes no way to change this. A multi-disc album laid out remotely as `…/Album/CD1/…` and `…/Album/CD2/…` therefore lands in **separate sibling folders** (`/downloads/CD1/`, `/downloads/CD2/`) with no shared album root on disk, and the bridge reports the per-disc folder, so Lidarr sees each disc as a separate, incomplete release. This **cannot be worked around in the bridge, nor with a Remote Path Mapping**, because no single folder contains every disc. Single-disc albums are unaffected. A real fix is blocked on an unreleased slskd capability; the prerequisite and the planned approach are documented in the `compute_storage_path` docstring (`src/slskd_lidarr_bridge/domain/paths.py`).
-- **Shared volume required:** `SLSKD_DOWNLOADS_DIR` must be the path that Lidarr also sees (direct shared volume or a Remote Path Mapping configured in Lidarr). Mismatched paths will cause Lidarr to fail to import completed downloads.
+- **Lidarr must reach slskd's downloads path:** the bridge reports slskd's own completed-downloads path to Lidarr (discovered from slskd's API). Lidarr must see that path — via a shared volume at the same path, or a Remote Path Mapping when the mounts differ (see [Completed-downloads path](#3-completed-downloads-path)). Otherwise Lidarr fails to import completed downloads.
