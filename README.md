@@ -60,8 +60,8 @@ In Lidarr: **Settings → Download Clients → Add → SABnzbd**
 | Name | slskd-bridge (or any label) |
 | Host | `bridge` |
 | Port | `8765` |
-| URL Base | `/sabnzbd` |
-| API Key | _(leave blank, the bridge does not require one)_ |
+| URL Base | `/sabnzbd` — under the **Show Advanced** toggle |
+| API Key | any character (e.g. `-`); the bridge ignores it, but Lidarr rejects a blank or whitespace-only key here |
 | Category | `music` |
 
 ### 2. Add a Newznab indexer
@@ -74,9 +74,9 @@ In Lidarr: **Settings → Indexers → Add → Newznab**
 | URL | `http://bridge:8765/indexer` |
 | API Path | `/api` |
 | API Key | _(leave blank, the bridge does not require one)_ |
-| Download Client | the **slskd-bridge** client from step 1 |
+| Download Client | the **slskd-bridge** client from step 1 — under the **Show Advanced** toggle |
 
-Setting **Download Client** on the indexer pins every grab from it to the bridge's client (and keeps bridge grabs off your real Usenet client). Leave your Usenet indexers on their own client and the two run side by side without interfering.
+Both **URL Base** (on the download client) and **Download Client** (on the indexer) live behind each form's **Show Advanced** toggle, so enable that first or you won't see them. Pinning the indexer's **Download Client** sends every grab from it to the bridge's client (and keeps bridge grabs off your real Usenet client); leave your Usenet indexers on their own client and the two run side by side without interfering.
 
 ### 3. Completed-downloads path
 
