@@ -52,6 +52,17 @@ volumes:
   bridge-data:
 ```
 
+> **Bind-mount users:** the bridge runs as `nobody` (UID/GID 65534). If you
+> mount a host directory instead of a named volume, the process won't be able
+> to write the database unless you set the ownership first:
+>
+> ```sh
+> sudo chown 65534:65534 /your/host/data/dir
+> ```
+>
+> Named volumes (as shown above) inherit the image's `/data` ownership
+> automatically — no manual `chown` needed.
+
 ## Lidarr setup
 
 Add the **download client first**, then the indexer — so you can pin the indexer to this client. That pin lets the bridge coexist with real Usenet: releases grabbed from the bridge's indexer go only to the bridge's client, and your Usenet indexers keep using your Usenet client, with no cross-wiring.
