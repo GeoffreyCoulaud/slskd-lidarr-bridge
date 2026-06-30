@@ -342,4 +342,4 @@ class TestErrorHandlerNoLeakage:
             for r in caplog.records
             if r.name == "slskd_lidarr_bridge.adapters.inbound.app"
         ]
-        assert any(eid in r.message for r in app_records)
+        assert any(eid in r.getMessage() for r in app_records)
