@@ -7,6 +7,7 @@ Newznab and SABnzbd blueprints, adds /health and error handlers.
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
 import flask
 from flask import Flask, jsonify, request
@@ -87,19 +88,28 @@ def create_app(
         if isinstance(e, HTTPException):
             return e
 
+        # Generate a short correlation id so the client can reference this error
+        # without us leaking any internal details into the response.
+        eid = uuid4().hex[:8]
+
         # The error is swallowed into a 200 envelope below (Lidarr's contract),
         # so log it here with its traceback — otherwise it would be invisible.
-        logger.exception("Unhandled error handling %s %s", request.method, request.path)
+        logger.exception(
+            "Unhandled error handling %s %s [ref=%s]",
+            request.method,
+            request.path,
+            eid,
+        )
 
         # Scope the error response by request path:
         # - /indexer/* → Newznab XML error
         # - everything else (including /sabnzbd/*) → JSON
         if request.path.startswith("/indexer"):
             return flask.Response(
-                build_error(900, str(e)),
+                build_error(900, f"Internal error (ref: {eid})"),
                 status=200,
                 content_type="application/xml",
             )
-        return jsonify({"status": False, "error": str(e)}), 200
+        return jsonify({"status": False, "error": f"internal error (ref: {eid})"}), 200
 
     return app

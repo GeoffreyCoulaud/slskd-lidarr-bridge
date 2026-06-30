@@ -253,3 +253,93 @@ class TestErrorHandlers:
         )
         resp = app.test_client().get("/indexer/nzb/nonexistent-id")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Tests: error handler — no exception-text leakage + correlation id
+# ---------------------------------------------------------------------------
+
+
+class TestErrorHandlerNoLeakage:
+    """Error handler must not expose raw exception text; must include a ref id."""
+
+    def test_indexer_error_hides_exception_text(self):
+        """Exception message must not appear in the XML body returned to the client."""
+        config = _make_config()
+        app = create_app(
+            config,
+            ExplodingGateway(),  # start_search raises "gateway search boom"
+            FakeReleaseStore(),
+            FakeJobStore(),
+            FakeClock(),
+        )
+        resp = app.test_client().get("/indexer/api?t=music&artist=A&album=B")
+        assert b"gateway search boom" not in resp.data
+
+    def test_indexer_error_body_contains_ref_id(self):
+        """The XML error description must carry a ref id."""
+        config = _make_config()
+        app = create_app(
+            config,
+            ExplodingGateway(),
+            FakeReleaseStore(),
+            FakeJobStore(),
+            FakeClock(),
+        )
+        resp = app.test_client().get("/indexer/api?t=music&artist=A&album=B")
+        assert b"ref:" in resp.data
+
+    def test_sabnzbd_error_hides_exception_text(self):
+        """Exception message must not appear in the JSON body returned to the client."""
+        config = _make_config()
+        app = create_app(
+            config,
+            ExplodingGateway(),  # transfers() raises "gateway transfers boom"
+            FakeReleaseStore(),
+            FakeJobStoreWithOneJob(),  # one job → statuses() calls transfers()
+            FakeClock(),
+        )
+        resp = app.test_client().get("/sabnzbd/api?mode=queue")
+        assert b"gateway transfers boom" not in resp.data
+
+    def test_sabnzbd_error_body_contains_ref_id(self):
+        """The JSON error field must carry a ref id."""
+        config = _make_config()
+        app = create_app(
+            config,
+            ExplodingGateway(),
+            FakeReleaseStore(),
+            FakeJobStoreWithOneJob(),
+            FakeClock(),
+        )
+        resp = app.test_client().get("/sabnzbd/api?mode=queue")
+        data = resp.get_json()
+        assert "ref:" in data["error"]
+
+    def test_log_record_contains_same_ref_id_as_response(self, caplog):
+        """The correlation id logged server-side must match the one in the response."""
+        config = _make_config()
+        app = create_app(
+            config,
+            ExplodingGateway(),  # start_search raises
+            FakeReleaseStore(),
+            FakeJobStore(),
+            FakeClock(),
+        )
+        with caplog.at_level(logging.ERROR):
+            resp = app.test_client().get("/indexer/api?t=music&artist=A&album=B")
+
+        # Extract eid from XML: description="Internal error (ref: <eid>)"
+        root = ET.fromstring(resp.data)
+        description = root.get("description", "")
+        assert "ref:" in description
+        # Parse the eid from the description string
+        eid = description.split("ref:")[1].strip().rstrip(")")
+
+        # The same eid must appear in the app logger's error record
+        app_records = [
+            r
+            for r in caplog.records
+            if r.name == "slskd_lidarr_bridge.adapters.inbound.app"
+        ]
+        assert any(eid in r.message for r in app_records)
