@@ -15,6 +15,8 @@ A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Sou
 | `BRIDGE_DB_PATH` | no | `/data/bridge.db` | Path to the SQLite database file |
 | `BRIDGE_MIN_BITRATE` | no | _(none)_ | Minimum acceptable bitrate in kbps; results below this are filtered out |
 
+> **slskd API key role:** create the key in slskd with the **`readwrite`** role — the bridge issues reads (search, status) and writes (enqueue/cancel downloads). As of slskd `0.25.x` the endpoints the bridge calls only require an authenticated key (the `Any` policy — no specific role is enforced yet), so any role technically works, but `readwrite` is the correct, future-proof choice for a client that writes.
+
 ## Docker Compose
 
 The bridge discovers slskd's completed-downloads directory from slskd's API, so it needs no downloads volume of its own — it only reports paths to Lidarr, it never reads the files. The shared volume is between **slskd and Lidarr** (see [Completed-downloads path](#3-completed-downloads-path) below).
@@ -47,18 +49,9 @@ volumes:
 
 ## Lidarr setup
 
-### 1. Add a Newznab indexer
+Add the **download client first**, then the indexer — so you can pin the indexer to this client. That pin lets the bridge coexist with real Usenet: releases grabbed from the bridge's indexer go only to the bridge's client, and your Usenet indexers keep using your Usenet client, with no cross-wiring.
 
-In Lidarr: **Settings → Indexers → Add → Newznab**
-
-| Field | Value |
-|---|---|
-| Name | slskd (or any label) |
-| URL | `http://bridge:8765/indexer` |
-| API Path | `/api` |
-| API Key | _(leave blank, the bridge does not require one)_ |
-
-### 2. Add a SABnzbd download client
+### 1. Add a SABnzbd download client
 
 In Lidarr: **Settings → Download Clients → Add → SABnzbd**
 
@@ -70,6 +63,20 @@ In Lidarr: **Settings → Download Clients → Add → SABnzbd**
 | URL Base | `/sabnzbd` |
 | API Key | _(leave blank, the bridge does not require one)_ |
 | Category | `music` |
+
+### 2. Add a Newznab indexer
+
+In Lidarr: **Settings → Indexers → Add → Newznab**
+
+| Field | Value |
+|---|---|
+| Name | slskd (or any label) |
+| URL | `http://bridge:8765/indexer` |
+| API Path | `/api` |
+| API Key | _(leave blank, the bridge does not require one)_ |
+| Download Client | the **slskd-bridge** client from step 1 |
+
+Setting **Download Client** on the indexer pins every grab from it to the bridge's client (and keeps bridge grabs off your real Usenet client). Leave your Usenet indexers on their own client and the two run side by side without interfering.
 
 ### 3. Completed-downloads path
 
