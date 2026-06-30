@@ -14,6 +14,8 @@ A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Sou
 | `SLSKD_SEARCH_TIMEOUT` | no | `30` | Seconds to wait for a slskd search. Also forwarded to slskd (as `searchTimeout`, in ms) so it governs slskd's own search window, not just the bridge's polling — raising it lets slskd gather responses from more peers |
 | `BRIDGE_DB_PATH` | no | `/data/bridge.db` | Path to the SQLite database file |
 | `BRIDGE_MIN_BITRATE` | no | _(none)_ | Minimum acceptable bitrate in kbps; results below this are filtered out |
+| `BRIDGE_MIN_RESULTS` | no | `3` | Stop issuing further (looser) fallback search queries once this many distinct releases have accumulated. The primary query always runs |
+| `BRIDGE_SEARCH_BUDGET` | no | `75` | Wall-clock budget gating the *fallback* queries — the primary query always runs to `SLSKD_SEARCH_TIMEOUT`. Keeps total search latency under Lidarr's ~100 s indexer-request abort, so keep `SLSKD_SEARCH_TIMEOUT` ≤ this and both well under 100. `0` runs the primary query only (disables fallbacks) |
 | `BRIDGE_STALL_TIMEOUT` | no | `1800` | Seconds a download may make **no progress** before the bridge reports it failed, so Lidarr stops waiting on a dead/offline peer and can try another release. `0` disables the check |
 | `BRIDGE_MAX_RETRIES` | no | `1` | Times a failed transfer is re-enqueued on slskd before the download is reported failed to Lidarr (Soulseek transfers fail transiently). `0` fails on the first error |
 | `LOG_LEVEL` | no | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); applies to the bridge and its dependencies (e.g. httpx) |
