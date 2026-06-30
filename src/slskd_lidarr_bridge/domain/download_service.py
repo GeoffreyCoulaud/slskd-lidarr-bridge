@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
@@ -24,22 +25,27 @@ class DownloadService:
         *,
         stall_timeout: int = 1800,
         max_retries: int = 1,
+        _failed_purge_seconds: int = 86400,
     ) -> None:
         self._gateway = gateway
         self._jobs = jobs
         self._clock = clock
         self._stall_timeout = stall_timeout
         self._max_retries = max_retries
-        # nzo_ids already logged at a terminal state, so each completion/failure
-        # is logged once rather than on every (frequent) status poll.
-        self._logged_terminal: set[str] = set()
-        # Retry rounds already spent per job (nzo_id -> count). In-memory like
-        # _logged_terminal; a restart resets a job's retry budget, which only
+        self._failed_purge_seconds = _failed_purge_seconds
+        # Guards _retries, _progress, and _terminal_since. Never hold while
+        # calling gateway I/O (transfers / enqueue / cancel).
+        self._lock: threading.Lock = threading.Lock()
+        # nzo_id → first instant the job became terminal (completed or failed).
+        # Presence drives log-once; for failed jobs it also drives the purge clock.
+        self._terminal_since: dict[str, datetime] = {}
+        # Retry rounds already spent per job (nzo_id → count). In-memory like
+        # _terminal_since; a restart resets a job's retry budget, which only
         # means a few extra retries in a rare case.
         self._retries: dict[str, int] = {}
         # Per-job progress watermark for stall detection:
-        # nzo_id -> (max transferred bytes seen, when that maximum was first seen).
-        # In-memory by design (mirrors _logged_terminal): a restart simply restarts
+        # nzo_id → (max transferred bytes seen, when that maximum was first seen).
+        # In-memory by design (mirrors _terminal_since): a restart simply restarts
         # each in-flight job's stall clock, which only delays detection by one
         # stall_timeout window — acceptable for a rare event.
         self._progress: dict[str, tuple[int, datetime]] = {}
@@ -79,10 +85,20 @@ class DownloadService:
 
     def statuses(self) -> list[JobStatusView]:
         """Return a JobStatusView for every tracked job."""
-        views: list[JobStatusView] = []
+        now = self._clock.now()
+        jobs = self._jobs.list()
 
-        for job in self._jobs.list():
-            all_transfers = self._gateway.transfers(job.username)
+        # #5b — batch transfers() by username: one call per distinct user,
+        # outside the lock (no slskd I/O while holding _lock).
+        transfers_by_user = {
+            u: self._gateway.transfers(u) for u in {j.username for j in jobs}
+        }
+
+        views: list[JobStatusView] = []
+        purge_ids: list[str] = []
+
+        for job in jobs:
+            all_transfers = transfers_by_user.get(job.username, [])
             job_filenames = {f.filename for f in job.files}
             matched = [t for t in all_transfers if t.filename in job_filenames]
 
@@ -104,16 +120,20 @@ class DownloadService:
                         self._gateway.downloads_directory(), job.files[0].filename
                     )
             elif any(t.is_failed for t in matched):
-                used = self._retries.get(job.nzo_id, 0)
-                if used < self._max_retries:
-                    # Re-enqueue the failed files and keep the job "downloading"
-                    # rather than reporting a failure Lidarr would blocklist.
+                # #4 — atomic check-and-increment under the lock so two concurrent
+                # threads cannot both read the same used count and both retry.
+                # The gateway.enqueue() call happens OUTSIDE the lock.
+                with self._lock:
+                    used = self._retries.get(job.nzo_id, 0)
+                    do_retry = used < self._max_retries
+                    if do_retry:
+                        self._retries[job.nzo_id] = used + 1
+                        # A retry is activity — reset the stall clock.
+                        self._progress[job.nzo_id] = (transferred_bytes, now)
+                if do_retry:
                     failed_names = {t.filename for t in matched if t.is_failed}
                     retry_files = [f for f in job.files if f.filename in failed_names]
-                    self._gateway.enqueue(job.username, retry_files)
-                    self._retries[job.nzo_id] = used + 1
-                    # A retry is activity — reset the stall clock below.
-                    self._progress[job.nzo_id] = (transferred_bytes, self._clock.now())
+                    self._gateway.enqueue(job.username, retry_files)  # I/O outside lock
                     logger.info(
                         "Retrying download %s after failure (attempt %d/%d): %r",
                         job.nzo_id,
@@ -131,24 +151,44 @@ class DownloadService:
             # on a dead peer and can try another release. stall_timeout <= 0
             # disables it.
             if state == "downloading" and self._stall_timeout > 0:
-                now = self._clock.now()
-                prev = self._progress.get(job.nzo_id)
-                if prev is None or transferred_bytes > prev[0]:
-                    # First sighting or fresh progress → (re)start the stall clock.
-                    self._progress[job.nzo_id] = (transferred_bytes, now)
-                elif (now - prev[1]).total_seconds() >= self._stall_timeout:
-                    state = "failed"
-                    fail_message = f"stalled: no progress for {self._stall_timeout}s"
+                # #4 — RMW on _progress is under the lock.
+                with self._lock:
+                    prev = self._progress.get(job.nzo_id)
+                    if prev is None or transferred_bytes > prev[0]:
+                        # First sighting or fresh progress → (re)start the stall clock.
+                        self._progress[job.nzo_id] = (transferred_bytes, now)
+                    elif (now - prev[1]).total_seconds() >= self._stall_timeout:
+                        state = "failed"
+                        fail_message = (
+                            f"stalled: no progress for {self._stall_timeout}s"
+                        )
 
-            # Log each terminal state once — statuses() is polled repeatedly.
-            if state in ("completed", "failed") and (
-                job.nzo_id not in self._logged_terminal
-            ):
-                self._logged_terminal.add(job.nzo_id)
-                if state == "completed":
-                    logger.info("Download completed: %r → %s", job.title, storage)
-                else:
-                    logger.warning("Download failed: %r (%s)", job.title, fail_message)
+            # Log each terminal state once and check for purge eligibility.
+            # logger calls stay outside the lock (logging is already thread-safe).
+            log_action: str | None = None
+            should_purge = False
+            if state in ("completed", "failed"):
+                with self._lock:
+                    if job.nzo_id not in self._terminal_since:
+                        # #5a — first terminal instant: drives log-once + purge.
+                        self._terminal_since[job.nzo_id] = now
+                        log_action = state
+                    elif state == "failed":
+                        # #5a — purge stale failed jobs (never purge completed).
+                        terminal_age = (
+                            now - self._terminal_since[job.nzo_id]
+                        ).total_seconds()
+                        if terminal_age >= self._failed_purge_seconds:
+                            should_purge = True
+
+            if log_action == "completed":
+                logger.info("Download completed: %r → %s", job.title, storage)
+            elif log_action == "failed":
+                logger.warning("Download failed: %r (%s)", job.title, fail_message)
+
+            if should_purge:
+                purge_ids.append(job.nzo_id)
+                continue  # exclude from returned views
 
             views.append(
                 JobStatusView(
@@ -164,6 +204,14 @@ class DownloadService:
                 )
             )
 
+        # #5a — remove stale failed jobs after the loop (don't mutate while iterating).
+        for nzo_id in purge_ids:
+            self._jobs.remove(nzo_id)
+            with self._lock:
+                self._terminal_since.pop(nzo_id, None)
+                self._progress.pop(nzo_id, None)
+                self._retries.pop(nzo_id, None)
+
         return views
 
     def remove(self, nzo_id: str) -> None:
@@ -172,6 +220,7 @@ class DownloadService:
         if job is None:
             return
 
+        # I/O outside the lock.
         all_transfers = self._gateway.transfers(job.username)
         job_filenames = {f.filename for f in job.files}
         matched = [t for t in all_transfers if t.filename in job_filenames]
@@ -181,7 +230,9 @@ class DownloadService:
                 self._gateway.cancel(job.username, transfer.id)
 
         self._jobs.remove(nzo_id)
-        self._logged_terminal.discard(nzo_id)
-        self._progress.pop(nzo_id, None)
-        self._retries.pop(nzo_id, None)
+        # #4 — in-memory cleanup under the lock.
+        with self._lock:
+            self._terminal_since.pop(nzo_id, None)
+            self._progress.pop(nzo_id, None)
+            self._retries.pop(nzo_id, None)
         logger.info("Removed download %s: %r", nzo_id, job.title)

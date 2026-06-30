@@ -28,6 +28,16 @@ class FakeGateway:
         self._transfers = transfers_by_username or {}
         self.enqueued: list[tuple[str, list[AudioFile]]] = []
         self.cancelled: list[tuple[str, str]] = []
+        # Optional service reference — when set, I/O methods assert not locked.
+        self.service: DownloadService | None = None
+        # Count calls per username for batching assertions.
+        self.transfers_call_count: dict[str, int] = {}
+
+    def _assert_not_locked(self) -> None:
+        if self.service is not None:
+            assert not self.service._lock.locked(), (
+                "Gateway I/O called while DownloadService._lock is held"
+            )
 
     # Unused search methods — satisfy Protocol
     def start_search(self, text: str) -> str:
@@ -40,9 +50,14 @@ class FakeGateway:
         return []
 
     def enqueue(self, username: str, files: list[AudioFile]) -> None:
+        self._assert_not_locked()
         self.enqueued.append((username, list(files)))
 
     def transfers(self, username: str) -> list[Transfer]:
+        self._assert_not_locked()
+        self.transfers_call_count[username] = (
+            self.transfers_call_count.get(username, 0) + 1
+        )
         return list(self._transfers.get(username, []))
 
     def set_transfers(self, username: str, transfers: list[Transfer]) -> None:
@@ -50,6 +65,7 @@ class FakeGateway:
         self._transfers[username] = transfers
 
     def cancel(self, username: str, transfer_id: str) -> None:
+        self._assert_not_locked()
         self.cancelled.append((username, transfer_id))
 
     def downloads_directory(self) -> str:
@@ -721,3 +737,185 @@ def test_remove_logs(caplog):
         for r in caplog.records
         if "download_service" in r.name
     )
+
+
+# ---------------------------------------------------------------------------
+# Tests — #4 thread-safety: no I/O while lock held + atomic retry
+# ---------------------------------------------------------------------------
+
+
+def test_no_io_while_lock_held_during_statuses():
+    """Gateway I/O (transfers, enqueue, cancel) must not happen while the lock is held.
+
+    FakeGateway.service is wired so each I/O method asserts not locked.
+    A failing job triggers both a transfers() call and a retry enqueue(),
+    exercising both paths.
+    """
+    gateway = FakeGateway(transfers_by_username={"alice": [_errored_transfer()]})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), max_retries=1)
+    gateway.service = service
+    service.start(SAMPLE_PAYLOAD_1, "music")
+
+    # Must not raise AssertionError from _assert_not_locked.
+    service.statuses()
+
+
+def test_no_io_while_lock_held_during_remove():
+    """transfers() and cancel() in remove() must not happen while the lock is held."""
+    in_progress = make_transfer(
+        r"@@a\Artist\Album\01.flac", transfer_id="t1", state="InProgress"
+    )
+    gateway = FakeGateway(transfers_by_username={"alice": [in_progress]})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+    gateway.service = service
+    nzo_id = service.start(SAMPLE_PAYLOAD_1, "music")
+
+    # Must not raise AssertionError from _assert_not_locked.
+    service.remove(nzo_id)
+
+
+def test_retry_reserved_atomically_no_double_enqueue():
+    """The retry count is reserved under the lock so two sequential statuses() calls
+    with max_retries=1 produce exactly one retry enqueue (not two).
+
+    Simulates the race: the first call reserves the retry slot; the second call
+    sees retries exhausted and reports failed — no extra enqueue.
+    """
+    gateway = FakeGateway(transfers_by_username={"alice": [_errored_transfer()]})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock(), max_retries=1)
+    service.start(SAMPLE_PAYLOAD_1, "music")
+
+    first = service.statuses()[0]
+    assert first.state == "downloading"
+
+    # Transfer is still errored on the second poll — retries exhausted.
+    second = service.statuses()[0]
+    assert second.state == "failed"
+
+    # start() enqueued once; exactly one retry enqueue — total = 2.
+    assert len(gateway.enqueued) == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests — #5a terminal-age purge
+# ---------------------------------------------------------------------------
+
+
+def test_failed_job_purged_after_threshold():
+    """A failed job whose terminal age exceeds _failed_purge_seconds is dropped
+    from the next statuses() and removed from the job store.
+    """
+    clock = FakeClock()
+    gateway = FakeGateway(transfers_by_username={"alice": [_errored_transfer()]})
+    jobs = FakeJobStore()
+    service = DownloadService(
+        gateway, jobs, clock, max_retries=0, _failed_purge_seconds=1
+    )
+    nzo_id = service.start(SAMPLE_PAYLOAD_1, "music")
+
+    # First poll: job transitions to failed, records terminal_since.
+    views = service.statuses()
+    assert len(views) == 1
+    assert views[0].state == "failed"
+
+    # Advance clock past threshold.
+    clock.advance(2)
+
+    # Second poll: terminal age > 1s → purged.
+    views = service.statuses()
+    assert len(views) == 0
+    assert jobs.get(nzo_id) is None
+
+
+def test_failed_job_retained_within_threshold():
+    """A failed job younger than the threshold is still included in statuses()."""
+    clock = FakeClock()
+    gateway = FakeGateway(transfers_by_username={"alice": [_errored_transfer()]})
+    jobs = FakeJobStore()
+    service = DownloadService(
+        gateway, jobs, clock, max_retries=0, _failed_purge_seconds=86400
+    )
+    nzo_id = service.start(SAMPLE_PAYLOAD_1, "music")
+
+    service.statuses()  # record terminal_since
+    clock.advance(3600)  # only 1 h — well within 24 h
+
+    views = service.statuses()
+    assert len(views) == 1
+    assert views[0].state == "failed"
+    assert jobs.get(nzo_id) is not None
+
+
+def test_completed_job_never_auto_purged():
+    """completed jobs are never auto-purged regardless of age."""
+    clock = FakeClock()
+    gateway = FakeGateway(
+        transfers_by_username={
+            "alice": [
+                make_transfer(
+                    r"@@a\Artist\Album\01.flac",
+                    transfer_id="t1",
+                    state="Completed, Succeeded",
+                    bytes_transferred=10_000_000,
+                ),
+            ]
+        }
+    )
+    jobs = FakeJobStore()
+    # Very short purge threshold — completed jobs must still survive.
+    service = DownloadService(gateway, jobs, clock, _failed_purge_seconds=1)
+    nzo_id = service.start(SAMPLE_PAYLOAD_1, "music")
+
+    service.statuses()  # record terminal_since as completed
+    clock.advance(100_000)  # way past any threshold
+
+    views = service.statuses()
+    assert len(views) == 1
+    assert views[0].state == "completed"
+    assert jobs.get(nzo_id) is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests — #5b batching: transfers() called once per username per statuses()
+# ---------------------------------------------------------------------------
+
+
+SAMPLE_PAYLOAD_2: dict = {
+    "username": "alice",
+    "title": "Artist - Album2 [FLAC]",
+    "album_folder": "Album2",
+    "total_size": 10_000_000,
+    "files": [
+        {"filename": r"@@a\Artist\Album2\01.flac", "size": 10_000_000},
+    ],
+}
+
+
+def test_transfers_called_once_per_username():
+    """With two jobs sharing one username, transfers() is called exactly once
+    per statuses() invocation — not once per job.
+    """
+    gateway = FakeGateway(transfers_by_username={"alice": []})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+    service.start(SAMPLE_PAYLOAD_1, "music")
+    service.start(SAMPLE_PAYLOAD_2, "music")
+
+    service.statuses()
+
+    assert gateway.transfers_call_count.get("alice", 0) == 1
+
+
+def test_transfers_called_once_per_username_multiple_polls():
+    """Batching holds across multiple polls: each statuses() call issues exactly
+    one transfers() call per distinct username.
+    """
+    gateway = FakeGateway(transfers_by_username={"alice": []})
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+    service.start(SAMPLE_PAYLOAD_1, "music")
+    service.start(SAMPLE_PAYLOAD_2, "music")
+
+    service.statuses()
+    service.statuses()
+
+    # Two polls × one username = exactly 2 total calls.
+    assert gateway.transfers_call_count.get("alice", 0) == 2
