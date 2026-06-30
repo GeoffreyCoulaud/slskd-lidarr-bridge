@@ -6,6 +6,8 @@ Newznab and SABnzbd blueprints, adds /health and error handlers.
 
 from __future__ import annotations
 
+import logging
+
 import flask
 from flask import Flask, jsonify, request
 from flask.typing import ResponseReturnValue
@@ -23,6 +25,8 @@ from slskd_lidarr_bridge.domain.ports import (
     SoulseekGateway,
 )
 from slskd_lidarr_bridge.domain.search_service import SearchService
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -78,6 +82,10 @@ def create_app(
         # Re-raise HTTP exceptions (404, 405, …) so Flask handles them normally.
         if isinstance(e, HTTPException):
             return e
+
+        # The error is swallowed into a 200 envelope below (Lidarr's contract),
+        # so log it here with its traceback — otherwise it would be invisible.
+        logger.exception("Unhandled error handling %s %s", request.method, request.path)
 
         # Scope the error response by request path:
         # - /indexer/* → Newznab XML error

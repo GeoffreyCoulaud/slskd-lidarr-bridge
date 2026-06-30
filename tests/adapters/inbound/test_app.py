@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 
@@ -138,6 +139,7 @@ def _make_config(**overrides) -> Config:
         search_timeout=30,
         db_path=":memory:",
         min_bitrate=None,
+        log_level="INFO",
     )
     defaults.update(overrides)
     return Config(**defaults)
@@ -220,6 +222,24 @@ class TestErrorHandlers:
         assert "error" in data
         # Must not be an HTML error page
         assert b"Traceback" not in resp.data
+
+    def test_unhandled_error_is_logged_with_traceback(self, caplog):
+        """Errors swallowed into a 200 envelope must still be logged."""
+        config = _make_config()
+        app = create_app(
+            config,
+            ExplodingGateway(),  # start_search raises
+            FakeReleaseStore(),
+            FakeJobStore(),
+            FakeClock(),
+        )
+        with caplog.at_level(logging.ERROR):
+            app.test_client().get("/indexer/api?t=music&artist=A&album=B")
+        assert any(
+            r.levelno == logging.ERROR and r.exc_info is not None
+            for r in caplog.records
+            if r.name == "slskd_lidarr_bridge.adapters.inbound.app"
+        )
 
     def test_404_not_swallowed_by_error_handler(self):
         """The error handler must not interfere with legitimate 404s."""

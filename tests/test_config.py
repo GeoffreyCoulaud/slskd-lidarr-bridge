@@ -83,6 +83,31 @@ def test_missing_slskd_api_key_raises():
 
 
 # ---------------------------------------------------------------------------
+# LOG_LEVEL
+# ---------------------------------------------------------------------------
+
+
+def test_log_level_defaults_to_info():
+    cfg = Config.from_env(REQUIRED)
+    assert cfg.log_level == "INFO"
+
+
+def test_log_level_from_env_is_normalised_to_upper():
+    cfg = Config.from_env({**REQUIRED, "LOG_LEVEL": "debug"})
+    assert cfg.log_level == "DEBUG"
+
+
+def test_blank_log_level_falls_back_to_info():
+    cfg = Config.from_env({**REQUIRED, "LOG_LEVEL": "   "})
+    assert cfg.log_level == "INFO"
+
+
+def test_invalid_log_level_raises():
+    with pytest.raises(ValueError, match="LOG_LEVEL"):
+        Config.from_env({**REQUIRED, "LOG_LEVEL": "verbose"})
+
+
+# ---------------------------------------------------------------------------
 # Immutability
 # ---------------------------------------------------------------------------
 

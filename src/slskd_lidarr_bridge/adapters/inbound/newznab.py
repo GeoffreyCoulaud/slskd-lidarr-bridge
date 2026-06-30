@@ -7,6 +7,7 @@ Exposes:
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +22,8 @@ from slskd_lidarr_bridge.adapters.inbound.xml import (
 from slskd_lidarr_bridge.domain.models import Release, SearchQuery
 from slskd_lidarr_bridge.domain.ports import ReleaseStore
 from slskd_lidarr_bridge.domain.search_service import SearchService
+
+logger = logging.getLogger(__name__)
 
 # Newznab category IDs for audio quality tiers
 _LOSSLESS_QUALITY_PREFIXES = ("FLAC", "ALAC", "WAV")
@@ -90,6 +93,11 @@ def create_newznab_blueprint(
             if query.is_empty:
                 return Response(_build_recent_feed(), content_type="application/xml")
             releases = search_service.search(query)
+            logger.info(
+                "Indexer search %r → %d releases",
+                query.to_search_text(),
+                len(releases),
+            )
             return Response(_build_rss(releases), content_type="application/xml")
 
         if t == "music":
@@ -100,6 +108,11 @@ def create_newznab_blueprint(
             if query.is_empty:
                 return Response(_build_recent_feed(), content_type="application/xml")
             releases = search_service.search(query)
+            logger.info(
+                "Indexer search %r → %d releases",
+                query.to_search_text(),
+                len(releases),
+            )
             return Response(_build_rss(releases), content_type="application/xml")
 
         return Response(

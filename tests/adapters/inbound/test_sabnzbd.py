@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 
 import flask
 
@@ -237,6 +238,22 @@ class TestAddFile:
         assert payload["username"] == "user1"
         assert payload["title"] == "Artist - Album [FLAC]"
         assert payload["album_folder"] == "Album"
+
+    def test_addfile_logs_enqueue(self, caplog):
+        svc = FakeDownloadService()
+        client = _make_app(download_service=svc).test_client()
+        nzb_bytes = _sample_nzb()
+        with caplog.at_level(logging.INFO):
+            client.post(
+                "/sabnzbd/api?mode=addfile&cat=music",
+                data={"name": (io.BytesIO(nzb_bytes), "test.nzb")},
+                content_type="multipart/form-data",
+            )
+        assert any(
+            r.levelno == logging.INFO and "SABnzbd_nzo_test001" in r.getMessage()
+            for r in caplog.records
+            if "sabnzbd" in r.name
+        )
 
     def test_addfile_no_file_returns_status_false(self):
         """addfile without a 'name' file field returns status:false (HTTP 200)."""
