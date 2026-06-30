@@ -94,7 +94,7 @@ class SearchService:
 
                 size = sum(f.size for f in files)
                 quality = detect_quality(files)
-                title = build_title(artist, album, quality)
+                title = build_title(artist, album, quality, response.username)
                 created_at = self._clock.now()
 
                 release = Release(
