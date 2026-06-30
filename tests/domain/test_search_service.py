@@ -127,12 +127,13 @@ def make_response(
     *,
     has_free_upload_slot: bool = False,
     upload_speed: int = 1_000_000,
+    queue_length: int = 0,
 ) -> SearchResponse:
     return SearchResponse(
         username=username,
         has_free_upload_slot=has_free_upload_slot,
         upload_speed=upload_speed,
-        queue_length=0,
+        queue_length=queue_length,
         files=tuple(files),
     )
 
@@ -322,6 +323,56 @@ def test_ordering_free_slot_before_no_slot():
     assert len(releases) == 2
     assert releases[0].username == "alice"  # free slot first
     assert releases[1].username == "bob"
+
+
+def test_ordering_shorter_queue_first_when_slot_and_speed_equal():
+    """Same free-slot and upload speed: the shorter remote queue ranks first.
+
+    slskd reports each peer's queue length; a long queue means a long wait even
+    from a fast peer, so among otherwise-equal peers we prefer the shorter queue.
+    """
+    resp_long = make_response(
+        "longq", [make_flac("AlbumA", 1)], upload_speed=1_000_000, queue_length=10
+    )
+    resp_short = make_response(
+        "shortq", [make_flac("AlbumB", 1)], upload_speed=1_000_000, queue_length=2
+    )
+    gateway = FakeGateway(completes_on=1, responses=[resp_long, resp_short])
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock)
+
+    releases = service.search(SearchQuery(artist="X", album="Y"))
+
+    assert [r.username for r in releases] == ["shortq", "longq"]
+
+
+def test_ordering_free_slot_outranks_shorter_queue():
+    """A free upload slot dominates queue length: free-but-long-queue still wins."""
+    resp_free_longq = make_response(
+        "free",
+        [make_flac("AlbumA", 1)],
+        has_free_upload_slot=True,
+        upload_speed=1_000_000,
+        queue_length=50,
+    )
+    resp_noslot_shortq = make_response(
+        "noslot",
+        [make_flac("AlbumB", 1)],
+        has_free_upload_slot=False,
+        upload_speed=1_000_000,
+        queue_length=0,
+    )
+    gateway = FakeGateway(
+        completes_on=1, responses=[resp_noslot_shortq, resp_free_longq]
+    )
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock)
+
+    releases = service.search(SearchQuery(artist="X", album="Y"))
+
+    assert [r.username for r in releases] == ["free", "noslot"]
 
 
 def test_min_bitrate_filters_low_bitrate_files():

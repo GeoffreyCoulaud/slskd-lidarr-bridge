@@ -60,8 +60,8 @@ class SearchService:
 
         responses = self._gateway.search_responses(sid)
 
-        # (has_free_upload_slot, upload_speed, release) — used for sorting.
-        tagged: list[tuple[bool, int, Release]] = []
+        # (has_free_upload_slot, upload_speed, queue_length, release) — for sorting.
+        tagged: list[tuple[bool, int, int, Release]] = []
 
         for response in responses:
             # Keep only audio files, filtered by min_bitrate when set.
@@ -122,9 +122,16 @@ class SearchService:
                 release_id = self._store.put(release)
                 release = dataclasses.replace(release, id=release_id)
                 tagged.append(
-                    (response.has_free_upload_slot, response.upload_speed, release)
+                    (
+                        response.has_free_upload_slot,
+                        response.upload_speed,
+                        response.queue_length,
+                        release,
+                    )
                 )
 
-        # Order by (free slot desc, upload speed desc).
-        tagged.sort(key=lambda x: (x[0], x[1]), reverse=True)
-        return [r for _, _, r in tagged]
+        # Order by (free slot desc, upload speed desc, queue length asc). The
+        # queue length is negated so that a single reverse=True sort yields a
+        # *shorter* queue first among peers that tie on slot and speed.
+        tagged.sort(key=lambda x: (x[0], x[1], -x[2]), reverse=True)
+        return [r for *_, r in tagged]
