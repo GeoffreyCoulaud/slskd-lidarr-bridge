@@ -7,6 +7,7 @@ Exposes:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from flask import Blueprint, Response, abort, request, url_for
@@ -24,6 +25,22 @@ from slskd_lidarr_bridge.domain.search_service import SearchService
 # Newznab category IDs for audio quality tiers
 _LOSSLESS_QUALITY_PREFIXES = ("FLAC", "ALAC", "WAV")
 _MP3_QUALITY_PREFIXES = ("MP3",)
+
+# Sentinel item returned for empty/recent feed requests.
+#
+# When an indexer is added/tested, Lidarr runs TestConnection(), which fetches
+# the *recent* feed — a query with no search terms — and rejects the indexer
+# unless it returns at least one result in a configured category ("Query
+# successful, but no results in the configured categories were returned from
+# your indexer"). This happens regardless of the RSS toggle. slskd has no notion
+# of "recent uploads", so we answer the empty query with a single placeholder.
+#
+# The title is deliberately unparseable as an artist/album so that, even if RSS
+# sync is enabled, Lidarr's parser cannot match it to a monitored album and will
+# never attempt to grab it. The pubDate is intentionally old for the same reason.
+_SENTINEL_TITLE = "slskd-bridge indexer online (connection-test placeholder)"
+_SENTINEL_GUID = "slskd-bridge-sentinel"
+_SENTINEL_PUBDATE = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def _quality_to_category(quality: str) -> int:
@@ -54,6 +71,11 @@ def create_newznab_blueprint(
     """
     bp = Blueprint("newznab", __name__, url_prefix="/indexer")
 
+    # Category advertised by the connection-test sentinel. The first configured
+    # category is always one Lidarr knows about (it is in the caps), so the test
+    # accepts it as "in the configured categories".
+    sentinel_category = categories[0][0]
+
     @bp.route("/api")
     def api() -> Response:
         t = request.args.get("t", "")
@@ -66,7 +88,7 @@ def create_newznab_blueprint(
             term = request.args.get("q") or None
             query = SearchQuery(term=term)
             if query.is_empty:
-                return Response(build_results_rss([]), content_type="application/xml")
+                return Response(_build_recent_feed(), content_type="application/xml")
             releases = search_service.search(query)
             return Response(_build_rss(releases), content_type="application/xml")
 
@@ -76,7 +98,7 @@ def create_newznab_blueprint(
             term = request.args.get("q") or None
             query = SearchQuery(artist=artist, album=album, term=term)
             if query.is_empty:
-                return Response(build_results_rss([]), content_type="application/xml")
+                return Response(_build_recent_feed(), content_type="application/xml")
             releases = search_service.search(query)
             return Response(_build_rss(releases), content_type="application/xml")
 
@@ -84,6 +106,24 @@ def create_newznab_blueprint(
             build_error(202, f"No such function: {t}"),
             content_type="application/xml",
         )
+
+    def _build_recent_feed() -> bytes:
+        """Single-item feed for empty/recent queries (Lidarr connection test).
+
+        Returns a placeholder item instead of an empty channel so Lidarr's
+        TestConnection accepts the indexer. See ``_SENTINEL_*`` for why this is
+        safe even when RSS sync is enabled. The search backend is never called.
+        """
+        nzb_url = url_for("newznab.nzb", release_id=_SENTINEL_GUID, _external=True)
+        item: dict[str, Any] = {
+            "title": _SENTINEL_TITLE,
+            "guid": _SENTINEL_GUID,
+            "link": nzb_url,
+            "pubDate": _SENTINEL_PUBDATE,
+            "size": 1,
+            "category": sentinel_category,
+        }
+        return build_results_rss([item])
 
     def _build_rss(releases: list[Release]) -> bytes:
         """Convert a list of Release objects to RSS bytes."""
