@@ -1,0 +1,60 @@
+name: Grype daily SBOM scan
+
+on:
+  schedule:
+    # Run every morning at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  security-events: write  # required to upload SARIF to GitHub code scanning
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract SBOM from image attestation
+        # Retrieves the signed CycloneDX SBOM that was attached to the image
+        # during the release workflow. jq decodes the base64 payload and extracts
+        # the predicate, which is the raw SBOM document.
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:latest
+          CERT_REGEXP: "^${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@refs/"
+        run: |
+          cosign verify-attestation \
+            --type cyclonedx \
+            --certificate-identity-regexp "${CERT_REGEXP}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE}" \
+            | jq -r '.payload | @base64d | fromjson | .predicate' \
+            > /tmp/sbom.cyclonedx.json
+
+      - name: Run Grype against SBOM
+        # Scans the SBOM (not the live image) so results are reproducible and
+        # fast. VEX suppression is applied via .grype.yaml → security/vex.openvex.json.
+        # fail-build is false — findings are surfaced via SARIF, not a job failure.
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        id: scan
+        with:
+          sbom: /tmp/sbom.cyclonedx.json
+          fail-build: "false"
+          output-format: sarif
+
+      - name: Upload SARIF to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
