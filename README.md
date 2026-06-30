@@ -30,7 +30,7 @@ services:
       SLSKD_DOWNLOADS_DIR: /downloads
 
   bridge:
-    image: slskd-lidarr-bridge:latest
+    image: ghcr.io/geoffreycoulaud/slskd-lidarr-bridge:latest
     ports:
       - "8765:8765"
     volumes:
