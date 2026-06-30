@@ -18,6 +18,7 @@ A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Sou
 | `BRIDGE_SEARCH_BUDGET` | no | `75` | Wall-clock budget gating the *fallback* queries — the primary query always runs to `SLSKD_SEARCH_TIMEOUT`. Keeps total search latency under Lidarr's ~100 s indexer-request abort, so keep `SLSKD_SEARCH_TIMEOUT` ≤ this and both well under 100. `0` runs the primary query only (disables fallbacks) |
 | `BRIDGE_STALL_TIMEOUT` | no | `1800` | Seconds a download may make **no progress** before the bridge reports it failed, so Lidarr stops waiting on a dead/offline peer and can try another release. `0` disables the check |
 | `BRIDGE_MAX_RETRIES` | no | `1` | Times a failed transfer is re-enqueued on slskd before the download is reported failed to Lidarr (Soulseek transfers fail transiently). `0` fails on the first error |
+| `BRIDGE_API_KEY` | no | _(none)_ | Shared API key for the Newznab indexer and SABnzbd surfaces. Blank or unset = no authentication required. When set, configure the **same value** in both Lidarr's Newznab and SABnzbd API-key fields |
 | `LOG_LEVEL` | no | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); applies to the bridge and its dependencies (e.g. httpx) |
 
 > **slskd API key role:** create the key in slskd with the **`readwrite`** role — the bridge issues reads (search, status) and writes (enqueue/cancel downloads). As of slskd `0.25.x` the endpoints the bridge calls only require an authenticated key (the `Any` policy — no specific role is enforced yet), so any role technically works, but `readwrite` is the correct, future-proof choice for a client that writes.
@@ -37,13 +38,12 @@ services:
 
   bridge:
     image: ghcr.io/geoffreycoulaud/slskd-lidarr-bridge:latest
-    ports:
-      - "8765:8765"
     volumes:
       - bridge-data:/data
     environment:
       SLSKD_URL: http://slskd:5030
       SLSKD_API_KEY: your-slskd-api-key
+      BRIDGE_PORT: 8765
     depends_on:
       - slskd
 
@@ -66,7 +66,7 @@ In Lidarr: **Settings → Download Clients → Add → SABnzbd**
 | Host | `bridge` |
 | Port | `8765` |
 | URL Base | `/sabnzbd` — under the **Show Advanced** toggle |
-| API Key | any character (e.g. `-`); the bridge ignores it, but Lidarr rejects a blank or whitespace-only key here |
+| API Key | set to the value of `BRIDGE_API_KEY` if configured; otherwise any non-blank string (e.g. `-`) since Lidarr rejects a blank key |
 | Category | `music` |
 
 ### 2. Add a Newznab indexer
@@ -77,7 +77,7 @@ In Lidarr: **Settings → Indexers → Add → Newznab**
 |---|---|
 | Name | slskd (or any label) |
 | URL | `http://bridge:8765/indexer` |
-| API Key | _(leave blank, the bridge does not require one)_ |
+| API Key | set to the value of `BRIDGE_API_KEY` if configured; otherwise leave blank |
 | Download Client | the **slskd-bridge** client from step 1 — under the **Show Advanced** toggle |
 
 Both **URL Base** (on the download client) and **Download Client** (on the indexer) live behind each form's **Show Advanced** toggle, so enable that first or you won't see them. Pinning the indexer's **Download Client** sends every grab from it to the bridge's client (and keeps bridge grabs off your real Usenet client); leave your Usenet indexers on their own client and the two run side by side without interfering.
