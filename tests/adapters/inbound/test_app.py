@@ -142,6 +142,8 @@ def _make_config(**overrides) -> Config:
         stall_timeout=1800,
         max_retries=1,
         log_level="INFO",
+        min_results=3,
+        search_budget=75,
     )
     defaults.update(overrides)
     return Config(**defaults)

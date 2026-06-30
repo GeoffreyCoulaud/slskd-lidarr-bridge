@@ -47,6 +47,12 @@ class Config:
     log_level:
         Root logging level name (e.g. ``INFO``, ``DEBUG``). Always a valid,
         upper-cased ``logging`` level name; defaults to ``INFO``.
+    min_results:
+        Stop issuing fallback candidates once this many distinct releases have
+        accumulated. Defaults to 3.
+    search_budget:
+        Wall-clock seconds gating fallback candidates (the primary always runs);
+        kept under Lidarr's hardcoded 100 s indexer-request abort. Defaults to 75.
     """
 
     slskd_url: str
@@ -59,6 +65,8 @@ class Config:
     stall_timeout: int
     max_retries: int
     log_level: str
+    min_results: int
+    search_budget: int
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -94,4 +102,6 @@ class Config:
             stall_timeout=int(env.get("BRIDGE_STALL_TIMEOUT", "1800")),
             max_retries=int(env.get("BRIDGE_MAX_RETRIES", "1")),
             log_level=log_level,
+            min_results=int(env.get("BRIDGE_MIN_RESULTS", "3")),
+            search_budget=int(env.get("BRIDGE_SEARCH_BUDGET", "75")),
         )
