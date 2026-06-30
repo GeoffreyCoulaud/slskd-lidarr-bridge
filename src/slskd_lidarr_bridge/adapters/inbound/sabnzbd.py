@@ -14,7 +14,20 @@ from slskd_lidarr_bridge.domain.download_service import DownloadService
 
 # The bridge only ever handles music; the SABnzbd shim advertises a single,
 # fixed category to Lidarr.
-_CATEGORIES: list[str] = ["music"]
+#
+# SABnzbd's get_config returns categories as objects, and Lidarr deserializes
+# each into a SabnzbdCategory (name/pp/script/dir/priority). Returning bare
+# strings makes Lidarr's download-client test abort with "Could not cast or
+# convert from System.String to ...SabnzbdCategory".
+_CATEGORIES: list[dict[str, str | int]] = [
+    {
+        "name": "music",
+        "pp": "",
+        "script": "Default",
+        "dir": "",
+        "priority": 0,
+    }
+]
 
 
 def create_sabnzbd_blueprint(
