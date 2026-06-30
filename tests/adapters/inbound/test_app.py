@@ -139,6 +139,8 @@ def _make_config(**overrides) -> Config:
         search_timeout=30,
         db_path=":memory:",
         min_bitrate=None,
+        stall_timeout=1800,
+        max_retries=1,
         log_level="INFO",
     )
     defaults.update(overrides)
