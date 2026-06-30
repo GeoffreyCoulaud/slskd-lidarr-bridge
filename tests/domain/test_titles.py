@@ -36,3 +36,25 @@ def test_all_path_hostile_chars_replaced() -> None:
     # Chars: \ / : * ? " < > |
     result = build_title('A\\B:C*D?E"F<G>H|I', "Album", "FLAC")
     assert result == "A B C D E F G H I - Album [FLAC]"
+
+
+def test_uploader_appended_as_release_group() -> None:
+    # The Soulseek uploader is appended scene-style ("-group") so that
+    # otherwise-identical releases from different uploaders are distinguishable.
+    assert (
+        build_title("Radiohead", "In Rainbows", "FLAC", "alice")
+        == "Radiohead - In Rainbows [FLAC]-alice"
+    )
+
+
+def test_uploader_appended_without_quality() -> None:
+    assert build_title("A", "B", "", "bob") == "A - B-bob"
+
+
+def test_uploader_sanitized() -> None:
+    # Path-hostile chars in the uploader are replaced and collapsed too.
+    assert build_title("A", "B", "FLAC", "dj/cool") == "A - B [FLAC]-dj cool"
+
+
+def test_empty_uploader_no_suffix() -> None:
+    assert build_title("A", "B", "FLAC", "") == "A - B [FLAC]"

@@ -173,6 +173,31 @@ def test_one_response_flac_album_one_folder():
     assert all(f.is_audio for f in r.files)
 
 
+def test_same_album_quality_distinct_titles_per_uploader():
+    """Two uploaders offering the same album+quality must get distinct titles.
+
+    Titles are derived from the query (artist/album) plus detected quality, so
+    without the uploader tag every result of a music search is named identically
+    and Lidarr's interactive search is impossible to disambiguate. The uploader
+    is appended scene-style to keep each release distinguishable.
+    """
+    files_a = [make_flac("My Album", i) for i in range(1, 3)]
+    files_b = [make_flac("My Album", i) for i in range(1, 3)]
+    resp_a = make_response("alice", files_a)
+    resp_b = make_response("bob", files_b)
+    gateway = FakeGateway(completes_on=1, responses=[resp_a, resp_b])
+    store = FakeStore()
+    clock = FakeClock()
+    service = SearchService(gateway, store, clock)
+
+    releases = service.search(SearchQuery(artist="My Artist", album="My Album"))
+
+    assert len(releases) == 2
+    by_user = {r.username: r.title for r in releases}
+    assert by_user["alice"] == "My Artist - My Album [FLAC]-alice"
+    assert by_user["bob"] == "My Artist - My Album [FLAC]-bob"
+
+
 def test_two_folders_produce_two_releases():
     files_a = [make_flac("Album A", i) for i in range(1, 3)]
     files_b = [make_flac("Album B", i) for i in range(1, 3)]
