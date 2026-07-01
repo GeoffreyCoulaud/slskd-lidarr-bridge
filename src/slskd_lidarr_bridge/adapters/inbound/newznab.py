@@ -106,36 +106,45 @@ def create_newznab_blueprint(
         if t == "search":
             # Normalise empty string → None so is_empty works correctly.
             term = request.args.get("q") or None
-            query = SearchQuery(term=term)
-            if query.is_empty:
-                return Response(_build_recent_feed(), content_type="application/xml")
-            releases = search_service.search(query)
-            logger.info(
-                "Indexer search %r → %d releases",
-                query.to_search_text(),
-                len(releases),
-            )
-            return Response(_build_rss(releases), content_type="application/xml")
+            return _run_query(SearchQuery(term=term))
 
         if t == "music":
             artist = request.args.get("artist") or None
             album = request.args.get("album") or None
             term = request.args.get("q") or None
-            query = SearchQuery(artist=artist, album=album, term=term)
-            if query.is_empty:
-                return Response(_build_recent_feed(), content_type="application/xml")
-            releases = search_service.search(query)
-            logger.info(
-                "Indexer search %r → %d releases",
-                query.to_search_text(),
-                len(releases),
-            )
-            return Response(_build_rss(releases), content_type="application/xml")
+            return _run_query(SearchQuery(artist=artist, album=album, term=term))
 
         return Response(
             build_error(202, f"No such function: {t}"),
             content_type="application/xml",
         )
+
+    def _run_query(query: SearchQuery) -> Response:
+        """Answer a t=search / t=music request, honouring Newznab pagination.
+
+        Lidarr paginates results in fixed pages of 100 (its
+        ``NewznabRequestGenerator`` hardcodes ``PageSize=100`` / ``MaxPages=30``),
+        advancing ``offset`` = 0, 100, 200, … and stopping a tier only once a page
+        comes back with fewer than 100 items (``HttpIndexerBase.IsFullPage``). We
+        cannot page through a live Soulseek swarm: each request re-runs a fresh
+        slskd search and mints a new guid per release, so a naive follow-up page
+        would re-trigger an *identical* Soulseek search and never look "short" to
+        Lidarr — hammering slskd until a live search happens to yield <100 folders
+        (observed as 4 identical searches for one album). We are therefore a
+        single-page indexer: a follow-up page (``offset`` > 0) returns an empty
+        feed *without* searching, so Lidarr stops after the first page.
+        """
+        if query.is_empty:
+            return Response(_build_recent_feed(), content_type="application/xml")
+        if (request.args.get("offset", type=int) or 0) > 0:
+            return Response(_build_rss([]), content_type="application/xml")
+        releases = search_service.search(query)
+        logger.info(
+            "Indexer search %r → %d releases",
+            query.to_search_text(),
+            len(releases),
+        )
+        return Response(_build_rss(releases), content_type="application/xml")
 
     def _nzb_url(release_id: str) -> str:
         """Build the NZB download URL, embedding the API key when configured."""
