@@ -740,7 +740,7 @@ def test_remove_logs(caplog):
 
 
 # ---------------------------------------------------------------------------
-# Tests — #4 thread-safety: no I/O while lock held + atomic retry
+# Tests — thread-safety: no I/O while lock held + atomic retry
 # ---------------------------------------------------------------------------
 
 
@@ -797,7 +797,7 @@ def test_retry_reserved_atomically_no_double_enqueue():
 
 
 # ---------------------------------------------------------------------------
-# Tests — #5a terminal-age purge
+# Tests — terminal-age purge of stale failed jobs
 # ---------------------------------------------------------------------------
 
 
@@ -876,7 +876,7 @@ def test_completed_job_never_auto_purged():
 
 
 # ---------------------------------------------------------------------------
-# Tests — #5b batching: transfers() called once per username per statuses()
+# Tests — batching: transfers() called once per username per statuses()
 # ---------------------------------------------------------------------------
 
 
