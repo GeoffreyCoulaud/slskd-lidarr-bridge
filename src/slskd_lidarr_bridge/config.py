@@ -33,11 +33,17 @@ class Config:
     bridge_port:
         TCP port to bind waitress to (default 8765).
     search_timeout:
-        Optional maximum seconds for a single slskd search (per query). ``0``
-        (default) means no per-query cap — each search takes the whole remaining
-        wall-clock budget, i.e. slskd's native one-search-per-query behaviour. A
-        positive value caps each search so several looser fallback candidates fit
-        within ``search_budget`` instead. slskd's own minimum is 5 s.
+        slskd's *idle* search window in seconds (its ``searchTimeout``): slskd
+        completes a search after this many seconds pass with **no new response**
+        (the timer resets on every response), so it must stay small — never the
+        whole budget, or a busy query never completes. Default 15 (slskd's own
+        default); ``0`` omits the field so slskd uses that default; positive values
+        must be >= slskd's 5 s minimum.
+    response_limit:
+        ``responseLimit`` sent on every search POST so a popular query — whose idle
+        timer keeps resetting — completes once this many peers have responded,
+        instead of running until the wall-clock budget. Default 100 (aligned with
+        the Newznab caps limit); ``<= 0`` omits it (slskd default 250).
     db_path:
         Path to the SQLite database file (default ``/data/bridge.db``).
     min_bitrate:
@@ -78,6 +84,7 @@ class Config:
     min_results: int
     search_budget: int
     api_key: str | None = None
+    response_limit: int = 100
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -110,7 +117,7 @@ class Config:
             slskd_api_key=env["SLSKD_API_KEY"],
             categories=list(_DEFAULT_CATEGORIES),
             bridge_port=int(env.get("BRIDGE_PORT", "8765")),
-            search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "0")),
+            search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "15")),
             db_path=env.get("BRIDGE_DB_PATH", "/data/bridge.db"),
             min_bitrate=min_bitrate,
             stall_timeout=int(env.get("BRIDGE_STALL_TIMEOUT", "1800")),
@@ -119,4 +126,5 @@ class Config:
             min_results=int(env.get("BRIDGE_MIN_RESULTS", "3")),
             search_budget=int(env.get("BRIDGE_SEARCH_BUDGET", "75")),
             api_key=api_key,
+            response_limit=int(env.get("SLSKD_RESPONSE_LIMIT", "100")),
         )

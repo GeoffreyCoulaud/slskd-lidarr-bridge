@@ -30,6 +30,7 @@ def test_full_env_parses_all_fields():
         "BRIDGE_MAX_RETRIES": "3",
         "BRIDGE_MIN_RESULTS": "5",
         "BRIDGE_SEARCH_BUDGET": "120",
+        "SLSKD_RESPONSE_LIMIT": "250",
     }
     cfg = Config.from_env(env)
 
@@ -44,6 +45,7 @@ def test_full_env_parses_all_fields():
     assert cfg.max_retries == 3
     assert cfg.min_results == 5
     assert cfg.search_budget == 120
+    assert cfg.response_limit == 250
 
 
 # ---------------------------------------------------------------------------
@@ -55,13 +57,14 @@ def test_defaults_when_optional_vars_absent():
     cfg = Config.from_env(REQUIRED)
 
     assert cfg.bridge_port == 8765
-    assert cfg.search_timeout == 0
+    assert cfg.search_timeout == 15
     assert cfg.db_path == "/data/bridge.db"
     assert cfg.min_bitrate is None
     assert cfg.stall_timeout == 1800
     assert cfg.max_retries == 1
     assert cfg.min_results == 3
     assert cfg.search_budget == 75
+    assert cfg.response_limit == 100
 
 
 def test_default_newznab_categories():

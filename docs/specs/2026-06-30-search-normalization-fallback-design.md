@@ -43,6 +43,13 @@ lack the inputs. We only transform the two strings we have. Decided.
   `RequestTimeout == Zero`). Same for RSS sync and interactive/automatic search.
   There is no aggregate multi-indexer budget. ⇒ Our whole `search()` call must
   finish comfortably under 100 s; this sets the wall-clock budget default.
+- **slskd's `searchTimeout` is an INACTIVITY timer, not a wall-clock cap**
+  (Soulseek.NET `SearchTimeout`: reset on every response). A *busy* query keeps
+  resetting it and stays `InProgress` for minutes; `GET /searches/{id}/responses`
+  returns `[]` until the search is `isComplete`. ⇒ Forward a **small** idle window
+  (not the budget) and complete busy queries via **`responseLimit`**; poll
+  `isComplete` up to the budget and read `/responses` only once complete. Verified
+  by production logs 2026-07-01 (see the corrected control-flow note below).
 
 ## Design
 
@@ -87,6 +94,22 @@ run_search(cand, window):  start_search(cand, window)   # slskd's searchTimeout 
   single fixed `search_timeout` both as slskd's window *and* the bridge's poll
   cap, so the bridge abandoned the primary at the instant slskd finalised, fetched
   an empty `/responses`, and fired a premature fallback that slskd refused (429).
+
+  **Correction 2 (2026-07-01, root cause of the *recurring* miss):** the first
+  correction still treated `searchTimeout` as "the window slskd spends gathering,
+  so slskd stops when the bridge stops polling." That premise is **wrong** —
+  `searchTimeout` is an *inactivity* timer (reset on each response), so forwarding
+  the whole budget (75−5=70 s) meant a popular query (108 responses/4748 files)
+  never went idle inside the poll window: the bridge timed out at ~73 s, read an
+  empty `/responses` (empty until `isComplete`), and returned 0 to Lidarr. Fix:
+  forward a **small bounded idle window** (`search_timeout`, default 15 s) — not
+  the budget — and send **`responseLimit`** (default 100) so a busy query
+  completes once enough peers reply; the wall-clock budget is now purely the
+  bridge's poll cap (poll `isComplete` up to the budget, read `/responses` only
+  when complete, return `[]` on a genuine timeout). This inverts the pathology:
+  popular albums now complete *fastest* (they hit `responseLimit` in seconds)
+  instead of always missing. The `SLSKD_SEARCH_TIMEOUT` env var changes meaning
+  accordingly (per-query cap → slskd idle window).
 - **`search_timeout` is now an *optional per-query maximum*, default `0` (no
   cap).** With no cap, a search uses the whole remaining budget — slskd's native
   one-search-per-query behaviour, which already works most of the time. A positive

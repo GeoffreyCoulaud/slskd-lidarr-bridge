@@ -384,7 +384,8 @@ def test_timeout_logs_warning(caplog):
         service.search(SearchQuery(artist="A", album="B"))
 
     assert any(
-        r.levelno == logging.WARNING and "timed out" in r.getMessage().lower()
+        r.levelno == logging.WARNING
+        and "did not complete within" in r.getMessage().lower()
         for r in caplog.records
         if "search_service" in r.name
     )
@@ -800,11 +801,18 @@ def test_primary_search_failure_propagates_when_nothing_collected():
 # ---------------------------------------------------------------------------
 
 
-def test_default_search_takes_whole_remaining_budget():
-    # search_timeout=0 (default) → no per-query cap → each search is sized to the
-    # remaining budget minus the inter-search margin (75 - 5 = 70).
+def test_idle_window_not_derived_from_budget():
+    """Regression for the end-to-end miss (slskd shows 100+ results, Lidarr 0).
+
+    ``searchTimeout`` is slskd's INACTIVITY window (reset on every response), not
+    a wall-clock cap. The old code forwarded the whole budget (75−5=70 s) as that
+    window when ``search_timeout=0``; on a busy query the idle timer never fired
+    inside the budget, so the bridge timed out and read an empty ``/responses``.
+    ``0`` must now mean "use slskd's own default idle window" (field omitted),
+    never "spend the whole budget idling".
+    """
     resp = make_response("alice", [make_flac("Folder", 1)])
-    gateway = RacyGateway(completes_after=1, default_responses=[resp])
+    gateway = FakeGateway(completes_on=1, responses=[resp])
     service = SearchService(
         gateway,
         FakeStore(),
@@ -816,40 +824,90 @@ def test_default_search_takes_whole_remaining_budget():
 
     service.search(SearchQuery(artist="Artist", album="Album"))
 
-    assert gateway.started_timeouts[0] == 70.0
+    assert gateway.started_timeouts[0] == 0.0  # slskd default (omitted), not 70
 
 
-def test_per_query_cap_limits_each_search_window():
-    # A positive search_timeout caps every search so several fallbacks fit.
+def test_poll_cap_is_budget_not_the_idle_window():
+    """The bridge must poll for ``isComplete`` up to the whole budget, not just
+    the forwarded idle window.
+
+    Old code capped polling at ``window + grace`` (≈ the idle window). Real slskd
+    completes only once its inactivity timer fires — often *after* the idle window
+    on a query with late stragglers — so a search that would have completed within
+    the budget was abandoned and its ``/responses`` read empty. Here slskd reports
+    ``isComplete`` on the 10th poll (~10 s), well past the 5 s idle window; the
+    result must still be captured.
+    """
+    resp = make_response("alice", [make_flac("Folder", 1)])
+    gateway = RacyGateway(completes_after=10, default_responses=[resp])
+    clock = FakeClock(advance_per_sleep=1.0)
+    service = SearchService(
+        gateway,
+        FakeStore(),
+        clock,
+        search_timeout=5,
+        search_budget=75,
+        poll_interval=1.0,
+        min_results=99,
+    )
+
+    releases = service.search(SearchQuery(artist="Artist", album="Album"))
+
+    assert len(releases) == 1  # captured, not abandoned at idle-window + grace
+
+
+def test_forwards_configured_idle_window_unchanged():
+    # The configured idle window is forwarded to slskd verbatim, never scaled by
+    # the budget (contrast the old budget−margin window). A 300 s budget still
+    # forwards the small 15 s idle window.
     resp = make_response("alice", [make_flac("Folder", 1)])
     gateway = RacyGateway(completes_after=1, default_responses=[resp])
     service = SearchService(
         gateway,
         FakeStore(),
         FakeClock(),
-        search_timeout=30,
-        search_budget=75,
+        search_timeout=15,
+        search_budget=300,
         min_results=99,
     )
 
     service.search(SearchQuery(artist="Artist", album="Album"))
 
-    assert gateway.started_timeouts  # at least the primary ran
-    assert all(t == 30.0 for t in gateway.started_timeouts)
+    assert gateway.started_timeouts[0] == 15.0  # idle window, not 300 − margin
 
 
-def test_fallback_windows_shrink_to_fit_remaining_budget():
-    # Each search burns ~30 s of wall clock. With a 30 s cap and a 75 s budget:
-    # primary(30) + fallback(30) leaves 15 s, so the third search is truncated to
-    # the remaining budget minus the margin (15 - 5 = 10) instead of being skipped.
+def test_same_idle_window_forwarded_to_every_candidate():
+    # Every candidate gets the same bounded idle window; it is not shrunk per
+    # search to "fit" the budget (the budget is the poll cap, not the slskd timer).
     resp = make_response("alice", [make_flac("Folder", 1)])
-    gateway = RacyGateway(completes_after=31, default_responses=[resp])
+    gateway = RacyGateway(completes_after=1, default_responses=[resp])
+    service = SearchService(
+        gateway,
+        FakeStore(),
+        FakeClock(),
+        search_timeout=20,
+        search_budget=75,
+        min_results=99,
+    )
+
+    service.search(SearchQuery(artist="Beyonce", album="Lemonade (Deluxe)"))
+
+    assert gateway.started_timeouts  # candidates ran
+    assert all(t == 20.0 for t in gateway.started_timeouts)
+
+
+def test_fallbacks_stop_once_budget_is_exhausted():
+    # Each search burns ~40 s of wall clock (completes_after=41 @ 1 s/poll). With a
+    # 75 s budget: primary (~40 s) then one fallback (times out at the remaining
+    # 35 s), leaving < the 5 s floor — so the third candidate is never started.
+    resp = make_response("alice", [make_flac("Folder", 1)])
+    gateway = RacyGateway(completes_after=41, default_responses=[resp])
     clock = FakeClock(advance_per_sleep=1.0)
     service = SearchService(
         gateway,
         FakeStore(),
         clock,
-        search_timeout=30,
+        search_timeout=15,
         search_budget=75,
         poll_interval=1.0,
         min_results=99,
@@ -857,24 +915,28 @@ def test_fallback_windows_shrink_to_fit_remaining_budget():
 
     service.search(SearchQuery(artist="Beyonce", album="Lemonade (Deluxe)"))
 
-    assert gateway.started_timeouts == [30.0, 30.0, 10.0]
+    # Primary + one fallback started; the album-only candidate is skipped.
+    assert gateway.started_searches == ["Beyonce Lemonade (Deluxe)", "Beyonce Lemonade"]
 
 
-def test_primary_still_runs_with_a_floored_window_when_budget_tiny():
-    # A misconfigured tiny budget must not starve the primary below slskd's 5 s
-    # minimum search window.
+def test_primary_deadline_floored_when_budget_tiny():
+    # A misconfigured tiny budget must not starve the primary: its poll deadline is
+    # floored to _MIN_SEARCH_WINDOW, so a search completing within that floor is
+    # captured instead of abandoned on the first poll.
     resp = make_response("alice", [make_flac("Folder", 1)])
-    gateway = RacyGateway(completes_after=1, default_responses=[resp])
+    gateway = RacyGateway(completes_after=3, default_responses=[resp])
+    clock = FakeClock(advance_per_sleep=1.0)
     service = SearchService(
         gateway,
         FakeStore(),
-        FakeClock(),
-        search_timeout=0,
+        clock,
+        search_timeout=15,
         search_budget=0,
+        poll_interval=1.0,
         min_results=99,
     )
 
     releases = service.search(SearchQuery(artist="Artist", album="Album"))
 
-    assert gateway.started_timeouts == [5.0]  # primary floored, no fallback
-    assert len(releases) == 1
+    assert len(releases) == 1  # primary captured under the floored deadline
+    assert len(gateway.started_searches) == 1  # budget 0 → no fallback

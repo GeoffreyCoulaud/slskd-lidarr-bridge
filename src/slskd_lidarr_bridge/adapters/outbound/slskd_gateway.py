@@ -49,10 +49,17 @@ class SlskdGateway:
     timeout:
         Per-request HTTP timeout in seconds (used only when the client is
         default-constructed here).
+    response_limit:
+        ``responseLimit`` sent on every search POST — slskd completes a search
+        once this many peer responses have accumulated, independently of the idle
+        ``searchTimeout``. This is what makes a *popular* query finish promptly
+        (a busy swarm never goes idle, so the inactivity timer alone would keep it
+        ``InProgress`` for minutes). ``<= 0`` omits the field, falling back to
+        slskd's own default (250).
 
-    The search window is chosen per call by the caller (``SearchService`` sizes it
-    from the wall-clock budget) and passed to :meth:`start_search`, not fixed on
-    the gateway.
+    The idle search window is chosen per call by the caller (``SearchService``
+    forwards a small, bounded value) and passed to :meth:`start_search`; the poll
+    budget is the caller's, not slskd's.
     """
 
     def __init__(
@@ -62,6 +69,7 @@ class SlskdGateway:
         *,
         client: httpx.Client | None = None,
         timeout: float = 30.0,
+        response_limit: int = 100,
     ) -> None:
         if client is None:
             self._client = httpx.Client(
@@ -73,6 +81,7 @@ class SlskdGateway:
             # Merge the auth header onto an injected client (e.g. in tests).
             client.headers["X-API-Key"] = api_key
             self._client = client
+        self._response_limit = response_limit
         self._downloads_directory: str | None = None
 
     # ------------------------------------------------------------------
@@ -98,15 +107,22 @@ class SlskdGateway:
     def start_search(self, text: str, timeout_seconds: float) -> str:
         """POST /api/v0/searches → return the new search id.
 
-        ``timeout_seconds`` is the window slskd should spend gathering responses;
-        it is sent as ``searchTimeout`` in milliseconds (slskd's unit) so slskd
-        stops when the bridge stops polling. A non-positive value omits the field,
-        falling back to slskd's own default (slskd rejects values below its 5 s
-        minimum).
+        ``timeout_seconds`` is slskd's *idle* window (``searchTimeout``): slskd
+        completes the search after this many seconds elapse with **no new
+        response** (the timer resets on every response), so it must be small and
+        bounded — never the whole poll budget. It is sent in milliseconds. A
+        non-positive value omits the field, falling back to slskd's own default
+        (15 s); slskd rejects positive values below its 5 s minimum.
+
+        ``responseLimit`` (from the gateway's ``response_limit``) is also sent so a
+        busy query — whose idle timer would otherwise keep resetting — completes
+        once enough peers have responded.
         """
         body: dict[str, object] = {"searchText": text}
         if timeout_seconds > 0:
             body["searchTimeout"] = int(timeout_seconds * 1000)
+        if self._response_limit > 0:
+            body["responseLimit"] = self._response_limit
         r = self._req("POST", "api", "v0", "searches", json=body)
         r.raise_for_status()
         search_id: str = r.json()["id"]

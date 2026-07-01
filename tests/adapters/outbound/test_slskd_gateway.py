@@ -41,10 +41,48 @@ def test_start_search_posts_correct_body_and_header():
     import json
 
     body = json.loads(request.content)
-    # The per-call window is forwarded to slskd in MILLISECONDS (30s → 30000ms),
-    # so slskd stops gathering when the bridge stops polling.
-    assert body == {"searchText": "artist album", "searchTimeout": 30000}
+    # The idle window is forwarded to slskd in MILLISECONDS (30s → 30000ms), and
+    # responseLimit (gateway default 100) bounds gathering so a busy query — whose
+    # idle timer keeps resetting — still completes promptly.
+    assert body == {
+        "searchText": "artist album",
+        "searchTimeout": 30000,
+        "responseLimit": 100,
+    }
     assert request.headers["x-api-key"] == API_KEY
+
+
+@respx.mock
+def test_start_search_forwards_response_limit():
+    """responseLimit from the gateway is sent on every search POST."""
+    route = respx.post(f"{BASE_URL}/api/v0/searches").mock(
+        return_value=httpx.Response(200, json={"id": "abc"})
+    )
+    client = httpx.Client(base_url=BASE_URL)
+    gw = SlskdGateway(BASE_URL, API_KEY, client=client, response_limit=42)
+    gw.start_search("q", 15)
+
+    import json
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["responseLimit"] == 42
+    assert body["searchTimeout"] == 15000
+
+
+@respx.mock
+def test_start_search_omits_response_limit_when_non_positive():
+    """response_limit <= 0 omits the field, falling back to slskd's own default."""
+    route = respx.post(f"{BASE_URL}/api/v0/searches").mock(
+        return_value=httpx.Response(200, json={"id": "abc"})
+    )
+    client = httpx.Client(base_url=BASE_URL)
+    gw = SlskdGateway(BASE_URL, API_KEY, client=client, response_limit=0)
+    gw.start_search("q", 15)
+
+    import json
+
+    body = json.loads(route.calls.last.request.content)
+    assert "responseLimit" not in body
 
 
 @respx.mock
