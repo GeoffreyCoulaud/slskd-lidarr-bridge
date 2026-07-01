@@ -88,7 +88,7 @@ class DownloadService:
         now = self._clock.now()
         jobs = self._jobs.list()
 
-        # #5b — batch transfers() by username: one call per distinct user,
+        # Batch transfers() by username: one call per distinct user, fetched
         # outside the lock (no slskd I/O while holding _lock).
         transfers_by_user = {
             u: self._gateway.transfers(u) for u in {j.username for j in jobs}
@@ -120,7 +120,7 @@ class DownloadService:
                         self._gateway.downloads_directory(), job.files[0].filename
                     )
             elif any(t.is_failed for t in matched):
-                # #4 — atomic check-and-increment under the lock so two concurrent
+                # Atomic check-and-increment under the lock so two concurrent
                 # threads cannot both read the same used count and both retry.
                 # The gateway.enqueue() call happens OUTSIDE the lock.
                 with self._lock:
@@ -151,7 +151,7 @@ class DownloadService:
             # on a dead peer and can try another release. stall_timeout <= 0
             # disables it.
             if state == "downloading" and self._stall_timeout > 0:
-                # #4 — RMW on _progress is under the lock.
+                # The read-modify-write on _progress is under the lock.
                 with self._lock:
                     prev = self._progress.get(job.nzo_id)
                     if prev is None or transferred_bytes > prev[0]:
@@ -170,11 +170,13 @@ class DownloadService:
             if state in ("completed", "failed"):
                 with self._lock:
                     if job.nzo_id not in self._terminal_since:
-                        # #5a — first terminal instant: drives log-once + purge.
+                        # Record the first terminal instant: drives both the
+                        # log-once behaviour and purge eligibility below.
                         self._terminal_since[job.nzo_id] = now
                         log_action = state
                     elif state == "failed":
-                        # #5a — purge stale failed jobs (never purge completed).
+                        # Purge stale failed jobs after a grace period; completed
+                        # jobs are never auto-purged (Lidarr's delete is authoritative).
                         terminal_age = (
                             now - self._terminal_since[job.nzo_id]
                         ).total_seconds()
@@ -204,7 +206,7 @@ class DownloadService:
                 )
             )
 
-        # #5a — remove stale failed jobs after the loop (don't mutate while iterating).
+        # Remove stale failed jobs after the loop (don't mutate while iterating).
         for nzo_id in purge_ids:
             self._jobs.remove(nzo_id)
             with self._lock:
@@ -230,7 +232,7 @@ class DownloadService:
                 self._gateway.cancel(job.username, transfer.id)
 
         self._jobs.remove(nzo_id)
-        # #4 — in-memory cleanup under the lock.
+        # In-memory cleanup under the lock.
         with self._lock:
             self._terminal_since.pop(nzo_id, None)
             self._progress.pop(nzo_id, None)
