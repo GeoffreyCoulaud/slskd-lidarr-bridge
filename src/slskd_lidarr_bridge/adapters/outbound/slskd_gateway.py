@@ -49,12 +49,10 @@ class SlskdGateway:
     timeout:
         Per-request HTTP timeout in seconds (used only when the client is
         default-constructed here).
-    search_timeout:
-        Seconds slskd should spend gathering responses for a search. Forwarded
-        as ``searchTimeout`` (in milliseconds) on ``start_search`` so the
-        configured value governs slskd's own search window, not just the
-        bridge's polling. ``<= 0`` omits the field (slskd enforces a minimum and
-        would reject a zero value), falling back to slskd's own default.
+
+    The search window is chosen per call by the caller (``SearchService`` sizes it
+    from the wall-clock budget) and passed to :meth:`start_search`, not fixed on
+    the gateway.
     """
 
     def __init__(
@@ -64,9 +62,7 @@ class SlskdGateway:
         *,
         client: httpx.Client | None = None,
         timeout: float = 30.0,
-        search_timeout: int = 30,
     ) -> None:
-        self._search_timeout = search_timeout
         if client is None:
             self._client = httpx.Client(
                 base_url=base_url,
@@ -99,16 +95,18 @@ class SlskdGateway:
     # SoulseekGateway implementation
     # ------------------------------------------------------------------
 
-    def start_search(self, text: str) -> str:
+    def start_search(self, text: str, timeout_seconds: float) -> str:
         """POST /api/v0/searches → return the new search id.
 
-        ``searchTimeout`` is sent in milliseconds (slskd's unit) so the
-        configured timeout governs slskd's search window. It is omitted for a
-        non-positive timeout, since slskd rejects values below its minimum.
+        ``timeout_seconds`` is the window slskd should spend gathering responses;
+        it is sent as ``searchTimeout`` in milliseconds (slskd's unit) so slskd
+        stops when the bridge stops polling. A non-positive value omits the field,
+        falling back to slskd's own default (slskd rejects values below its 5 s
+        minimum).
         """
         body: dict[str, object] = {"searchText": text}
-        if self._search_timeout > 0:
-            body["searchTimeout"] = self._search_timeout * 1000
+        if timeout_seconds > 0:
+            body["searchTimeout"] = int(timeout_seconds * 1000)
         r = self._req("POST", "api", "v0", "searches", json=body)
         r.raise_for_status()
         search_id: str = r.json()["id"]

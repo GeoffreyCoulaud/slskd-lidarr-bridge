@@ -33,7 +33,7 @@ def test_start_search_posts_correct_body_and_header():
         )
     )
     gw, _ = make_gateway()
-    result = gw.start_search("artist album")
+    result = gw.start_search("artist album", 30)
 
     assert result == "abc123"
     assert route.called
@@ -41,9 +41,8 @@ def test_start_search_posts_correct_body_and_header():
     import json
 
     body = json.loads(request.content)
-    # The configured search timeout is forwarded to slskd in MILLISECONDS, so the
-    # setting governs slskd's own search window (default 30s → 30000ms) rather
-    # than only the bridge's client-side polling.
+    # The per-call window is forwarded to slskd in MILLISECONDS (30s → 30000ms),
+    # so slskd stops gathering when the bridge stops polling.
     assert body == {"searchText": "artist album", "searchTimeout": 30000}
     assert request.headers["x-api-key"] == API_KEY
 
@@ -53,9 +52,8 @@ def test_start_search_forwards_timeout_in_milliseconds():
     route = respx.post(f"{BASE_URL}/api/v0/searches").mock(
         return_value=httpx.Response(200, json={"id": "abc"})
     )
-    client = httpx.Client(base_url=BASE_URL)
-    gw = SlskdGateway(BASE_URL, API_KEY, client=client, search_timeout=45)
-    gw.start_search("q")
+    gw, _ = make_gateway()
+    gw.start_search("q", 45)
 
     import json
 
@@ -65,13 +63,12 @@ def test_start_search_forwards_timeout_in_milliseconds():
 
 @respx.mock
 def test_start_search_omits_timeout_when_non_positive():
-    """search_timeout<=0 omits searchTimeout (slskd's [Range(5,..)] would 400)."""
+    """A non-positive window omits searchTimeout (slskd's [Range(5,..)] would 400)."""
     route = respx.post(f"{BASE_URL}/api/v0/searches").mock(
         return_value=httpx.Response(200, json={"id": "abc"})
     )
-    client = httpx.Client(base_url=BASE_URL)
-    gw = SlskdGateway(BASE_URL, API_KEY, client=client, search_timeout=0)
-    gw.start_search("q")
+    gw, _ = make_gateway()
+    gw.start_search("q", 0)
 
     import json
 
@@ -396,7 +393,7 @@ def test_start_search_raises_on_500():
     respx.post(f"{BASE_URL}/api/v0/searches").mock(return_value=httpx.Response(500))
     gw, _ = make_gateway()
     with pytest.raises(httpx.HTTPStatusError):
-        gw.start_search("some query")
+        gw.start_search("some query", 30)
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +502,7 @@ def test_start_search_posts_to_static_searches_path():
         return_value=httpx.Response(200, json={"id": "enc-test-id"})
     )
     gw, _ = make_gateway()
-    result = gw.start_search("test query")
+    result = gw.start_search("test query", 30)
 
     assert route.called
     assert result == "enc-test-id"

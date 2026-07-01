@@ -68,7 +68,7 @@ class FakeGateway:
     def downloads_directory(self) -> str:
         return self._downloads_dir
 
-    def start_search(self, text: str) -> str:
+    def start_search(self, text: str, timeout_seconds: float) -> str:
         return "fake-search-id-001"
 
     def search_is_complete(self, search_id: str) -> bool:

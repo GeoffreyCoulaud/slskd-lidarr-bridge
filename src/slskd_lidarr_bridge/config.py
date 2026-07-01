@@ -33,7 +33,11 @@ class Config:
     bridge_port:
         TCP port to bind waitress to (default 8765).
     search_timeout:
-        Seconds to wait for a slskd search to complete (default 30).
+        Optional maximum seconds for a single slskd search (per query). ``0``
+        (default) means no per-query cap — each search takes the whole remaining
+        wall-clock budget, i.e. slskd's native one-search-per-query behaviour. A
+        positive value caps each search so several looser fallback candidates fit
+        within ``search_budget`` instead. slskd's own minimum is 5 s.
     db_path:
         Path to the SQLite database file (default ``/data/bridge.db``).
     min_bitrate:
@@ -51,8 +55,10 @@ class Config:
         Stop issuing fallback candidates once this many distinct releases have
         accumulated. Defaults to 3.
     search_budget:
-        Wall-clock seconds gating fallback candidates (the primary always runs);
-        kept under Lidarr's hardcoded 100 s indexer-request abort. Defaults to 75.
+        Total wall-clock seconds for the whole search across all candidates; kept
+        under Lidarr's hardcoded 100 s indexer-request abort. Each candidate takes
+        the remaining budget (minus a small inter-search margin), optionally capped
+        by ``search_timeout``. Defaults to 75.
     api_key:
         Optional shared key for the Newznab and SABnzbd surfaces
         (``BRIDGE_API_KEY``). ``None`` means no authentication required.
@@ -104,7 +110,7 @@ class Config:
             slskd_api_key=env["SLSKD_API_KEY"],
             categories=list(_DEFAULT_CATEGORIES),
             bridge_port=int(env.get("BRIDGE_PORT", "8765")),
-            search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "30")),
+            search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "0")),
             db_path=env.get("BRIDGE_DB_PATH", "/data/bridge.db"),
             min_bitrate=min_bitrate,
             stall_timeout=int(env.get("BRIDGE_STALL_TIMEOUT", "1800")),

@@ -20,6 +20,21 @@ from slskd_lidarr_bridge.domain.titles import build_title
 
 logger = logging.getLogger(__name__)
 
+# Each candidate search takes the wall-clock time still available in the budget
+# (see ``search_budget``). These constants bound that window.
+
+# Reserved between one search finishing and the next candidate being submitted.
+# slskd serialises search submissions (an overlap gets an immediate HTTP 429) and
+# needs a beat to finish its current search and free the slot; this margin also
+# keeps the total comfortably under Lidarr's ~100 s request abort.
+_INTER_SEARCH_MARGIN = 5.0
+# A search shorter than this is not worth a round-trip and would fall below
+# slskd's minimum ``searchTimeout`` (5 s), so we stop rather than start one.
+_MIN_SEARCH_WINDOW = 5.0
+# Poll a little past the window we forwarded to slskd: it flips ``isComplete``
+# just after its search window ends, and we want the finished result set.
+_COMPLETION_GRACE = 3.0
+
 
 class SearchService:
     def __init__(
@@ -28,7 +43,7 @@ class SearchService:
         store: ReleaseStore,
         clock: Clock,
         *,
-        search_timeout: int = 30,
+        search_timeout: int = 0,
         poll_interval: float = 1.0,
         min_bitrate: int | None = None,
         release_ttl_days: int = 7,
@@ -60,34 +75,70 @@ class SearchService:
         start = self._clock.now()
 
         for index, text in enumerate(candidates):
-            if index > 0:
+            elapsed = (self._clock.now() - start).total_seconds()
+            window = self._search_window(self._search_budget - elapsed)
+            if index == 0:
+                # The primary always runs; a tight budget must not starve it.
+                window = max(window, _MIN_SEARCH_WINDOW)
+            else:
                 if len(seen) >= self._min_results:
                     break
-                elapsed = (self._clock.now() - start).total_seconds()
-                if elapsed >= self._search_budget:
+                # Only start another candidate if enough budget remains for a
+                # worthwhile search; a shorter one just hammers Soulseek.
+                if window < _MIN_SEARCH_WINDOW:
                     break
-                remaining = self._search_budget - elapsed
-                max_seconds = min(float(self._search_timeout), max(remaining, 0.0))
-            else:
-                max_seconds = float(self._search_timeout)
 
-            responses = self._run_search(text, max_seconds)
+            try:
+                responses = self._run_search(text, window)
+            except Exception:
+                if not tagged:
+                    # Nothing collected yet: a failing search is a genuine error
+                    # (e.g. slskd is down). Surface it so Lidarr gets an error
+                    # envelope rather than a false "no results".
+                    raise
+                # A later, looser candidate failing (429/network) must not discard
+                # results already collected from an earlier, higher-precision
+                # candidate. Keep them and stop walking.
+                logger.warning(
+                    "Candidate search %r failed; keeping earlier results",
+                    text,
+                    exc_info=True,
+                )
+                break
             self._collect(responses, seen, tagged)
 
         # Order by (free slot desc, upload speed desc, queue length asc).
         tagged.sort(key=lambda x: (x[0], x[1], -x[2]), reverse=True)
         return [r for *_, r in tagged]
 
-    def _run_search(self, text: str, max_seconds: float) -> list[SearchResponse]:
-        sid = self._gateway.start_search(text)
+    def _search_window(self, remaining: float) -> float:
+        """Seconds a single search may run: the remaining wall-clock budget minus
+        the inter-search margin, optionally capped by the per-query maximum.
+
+        With ``search_timeout == 0`` (default) a search takes the whole remaining
+        budget — slskd's native "one search per query" behaviour. A positive
+        ``search_timeout`` caps each search so several looser candidates fit inside
+        the budget instead.
+        """
+        window = remaining - _INTER_SEARCH_MARGIN
+        if self._search_timeout > 0:
+            window = min(window, float(self._search_timeout))
+        return window
+
+    def _run_search(self, text: str, window: float) -> list[SearchResponse]:
+        # Forward the window to slskd as its own searchTimeout so it stops
+        # gathering when we stop polling — no lingering search to 429 the next
+        # candidate. Poll a little past it to catch isComplete.
+        sid = self._gateway.start_search(text, window)
+        poll_cap = window + _COMPLETION_GRACE
         start = self._clock.now()
         while not self._gateway.search_is_complete(sid):
             elapsed = (self._clock.now() - start).total_seconds()
-            if elapsed >= max_seconds:
+            if elapsed >= poll_cap:
                 logger.warning(
                     "Search %r timed out after %ss; returning partial results",
                     text,
-                    max_seconds,
+                    poll_cap,
                 )
                 break
             self._clock.sleep(self._poll_interval)

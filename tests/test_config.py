@@ -55,7 +55,7 @@ def test_defaults_when_optional_vars_absent():
     cfg = Config.from_env(REQUIRED)
 
     assert cfg.bridge_port == 8765
-    assert cfg.search_timeout == 30
+    assert cfg.search_timeout == 0
     assert cfg.db_path == "/data/bridge.db"
     assert cfg.min_bitrate is None
     assert cfg.stall_timeout == 1800
