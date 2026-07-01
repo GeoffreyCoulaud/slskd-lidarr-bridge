@@ -15,8 +15,6 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
@@ -27,32 +25,40 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract SBOM from image attestation
-        # Retrieves the signed CycloneDX SBOM that was attached to the image
-        # during the release workflow. jq decodes the base64 payload and extracts
-        # the predicate, which is the raw SBOM document.
-        # CERT_REGEXP keeps the repository's original case (the OIDC cert
-        # identity preserves it); IMAGE is lowercased below (OCI refs must be).
+      - name: Extract SBOM and VEX from image attestations
+        # Everything the scan needs comes from the image's own signed attestations
+        # — nothing is read from the repo, so this workflow doesn't even check it out:
+        #   - Syft-JSON SBOM (type https://syft.dev/bom): scanned instead of the
+        #     CycloneDX one because it preserves the image source identity that
+        #     image-scoped OpenVEX matching needs (CycloneDX drops it → VEX no-ops);
+        #   - OpenVEX triage (type openvex): applied via Grype's --vex.
+        # jq decodes the base64 payload and extracts the predicate (the raw document).
+        # CERT_REGEXP keeps the repository's original case (the OIDC cert identity
+        # preserves it); IMAGE is lowercased below (OCI refs must be).
         env:
           CERT_REGEXP: "^${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@refs/"
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:latest"
-          cosign verify-attestation \
-            --type cyclonedx \
-            --certificate-identity-regexp "${CERT_REGEXP}" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            "${IMAGE}" \
-            | jq -rs '.[0].payload | @base64d | fromjson | .predicate' \
-            > /tmp/sbom.cyclonedx.json
+          verify() {  # $1 = predicate type -> stdout: the raw predicate JSON
+            cosign verify-attestation \
+              --type "$1" \
+              --certificate-identity-regexp "${CERT_REGEXP}" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "${IMAGE}" \
+              | jq -rs '.[0].payload | @base64d | fromjson | .predicate'
+          }
+          verify "https://syft.dev/bom" > /tmp/sbom.syft.json
+          verify openvex                > /tmp/vex.openvex.json
 
       - name: Run Grype against SBOM
-        # Scans the SBOM (not the live image) so results are reproducible and
-        # fast. VEX suppression is applied via .grype.yaml → security/vex.openvex.json.
-        # fail-build is false — findings are surfaced via SARIF, not a job failure.
+        # Scans the SBOM (not the live image) so results are reproducible and fast,
+        # applying the OpenVEX pulled from the image. fail-build is false — findings
+        # are surfaced via SARIF, not a job failure.
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         id: scan
         with:
-          sbom: /tmp/sbom.cyclonedx.json
+          sbom: /tmp/sbom.syft.json
+          vex: /tmp/vex.openvex.json
           fail-build: "false"
           output-format: sarif
 
