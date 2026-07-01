@@ -24,6 +24,11 @@ from uuid import uuid4
 
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
 
+# Fixed location of the SQLite file inside the container's ``/data`` volume.
+# Not user-configurable; tests override it by passing ``db_path`` to
+# ``open_stores`` (or by patching this constant).
+DEFAULT_DB_PATH = "/data/bridge.db"
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS releases (
     id          TEXT PRIMARY KEY,
@@ -308,15 +313,19 @@ class SqliteJobStore:
         self._store.close()
 
 
-def open_stores(db_path: str) -> tuple[SqliteReleaseStore, SqliteJobStore]:
+def open_stores(
+    db_path: str | None = None,
+) -> tuple[SqliteReleaseStore, SqliteJobStore]:
     """Build both typed wrappers sharing one ``SqliteStore`` (one DB connection).
 
     Usage::
 
-        release_store, job_store = open_stores("/data/bridge.db")
+        release_store, job_store = open_stores()          # DEFAULT_DB_PATH
+        release_store, job_store = open_stores("/tmp/x.db")  # explicit override
 
-    Both wrappers share the same underlying connection and per-instance write
-    lock, so they are safe to use from multiple threads simultaneously.
+    ``db_path`` defaults to ``DEFAULT_DB_PATH`` (resolved at call time). Both
+    wrappers share the same underlying connection and per-instance write lock,
+    so they are safe to use from multiple threads simultaneously.
     """
-    store = SqliteStore(db_path)
+    store = SqliteStore(db_path if db_path is not None else DEFAULT_DB_PATH)
     return SqliteReleaseStore(store), SqliteJobStore(store)

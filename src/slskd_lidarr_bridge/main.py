@@ -24,12 +24,15 @@ from slskd_lidarr_bridge.logging_setup import configure_logging
 logger = logging.getLogger(__name__)
 
 
-def build_app(env: Mapping[str, str]) -> Flask:
+def build_app(env: Mapping[str, str], *, db_path: str | None = None) -> Flask:
     """Build the Flask application from environment variables.
 
     Args:
         env: Mapping of environment variable names to values
              (typically ``os.environ``).
+        db_path: SQLite database path. ``None`` uses the store's
+             ``DEFAULT_DB_PATH`` (the fixed ``/data`` location); tests pass a
+             temporary path here.
 
     Returns:
         A fully wired Flask application.
@@ -38,7 +41,7 @@ def build_app(env: Mapping[str, str]) -> Flask:
         ValueError: if a required environment variable is missing.
     """
     config = Config.from_env(env)
-    release_store, job_store = open_stores(config.db_path)
+    release_store, job_store = open_stores(db_path)
     gateway = SlskdGateway(
         config.slskd_url,
         config.slskd_api_key,
