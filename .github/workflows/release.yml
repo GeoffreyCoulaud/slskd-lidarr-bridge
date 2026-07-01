@@ -23,7 +23,7 @@ jobs:
       packages: write
       id-token: write  # required for OIDC keyless cosign signing
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # On a tag push, fail the release if pyproject.toml wasn't bumped to match
       - name: Verify pyproject.toml version matches the tag
