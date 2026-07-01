@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import gc
+import hashlib
 import sqlite3
 import warnings
 from datetime import UTC, datetime
@@ -39,15 +41,20 @@ FILE2 = AudioFile(
 )
 
 
-def make_release(created_at: datetime = DT_NOW) -> Release:
+def make_release(
+    created_at: datetime = DT_NOW,
+    *,
+    username: str = "peer1",
+    album_folder: str = "Album",
+) -> Release:
     return Release(
         artist="Test Artist",
         album="Test Album",
         title="Test Artist - Test Album [FLAC]",
-        username="peer1",
+        username=username,
         files=(FILE1, FILE2),
         size=55_000_000,
-        album_folder="Album",
+        album_folder=album_folder,
         quality="FLAC",
         created_at=created_at,
     )
@@ -111,7 +118,8 @@ def test_release_put_returns_id_and_get_roundtrips(stores, tmp_path):
     rid = rs.put(rel)
 
     assert isinstance(rid, str)
-    assert len(rid) == 16
+    assert len(rid) == 64
+    assert all(c in "0123456789abcdef" for c in rid)
 
     fetched = rs.get(rid)
     assert fetched is not None
@@ -147,8 +155,11 @@ def test_release_get_does_not_return_jobs(stores, tmp_path):
 
 def test_release_purge_older_than(stores, tmp_path):
     rs, _ = stores(str(tmp_path / "db.sqlite"))
-    old_id = rs.put(make_release(created_at=DT_OLD))
-    new_id = rs.put(make_release(created_at=DT_NOW))
+    # Distinct folders → distinct ids (the id is derived from the folder), so the
+    # two rows are independent and only the older one is purged.
+    old_id = rs.put(make_release(created_at=DT_OLD, album_folder="OldAlbum"))
+    new_id = rs.put(make_release(created_at=DT_NOW, album_folder="NewAlbum"))
+    assert old_id != new_id
 
     cutoff = datetime(2024, 3, 1, tzinfo=UTC)
     rs.purge_older_than(cutoff)
@@ -195,6 +206,48 @@ def test_release_naive_created_at_is_read_back_as_utc(stores, tmp_path):
     assert fetched is not None
     assert fetched.created_at.tzinfo is not None
     assert fetched.created_at == datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic release id (SHA-256 of username + album_folder)
+# ---------------------------------------------------------------------------
+
+
+def test_release_id_is_sha256_of_username_and_folder(stores, tmp_path):
+    rs, _ = stores(str(tmp_path / "db.sqlite"))
+    rel = make_release(username="alice", album_folder="Cool Album (Deluxe)")
+    rid = rs.put(rel)
+
+    expected = hashlib.sha256(b"alice\x00Cool Album (Deluxe)").hexdigest()
+    assert rid == expected
+
+
+def test_release_put_same_folder_is_idempotent_and_replaces(stores, tmp_path):
+    """Re-putting the same (username, folder) reuses the id and refreshes the row.
+
+    With the old random uuid this created a second row and a fresh guid; now it
+    must return the same id, not raise on the primary-key clash, and overwrite
+    the stored fields (so created_at tracks the latest sighting for TTL purging).
+    """
+    rs, _ = stores(str(tmp_path / "db.sqlite"))
+    first = rs.put(make_release(created_at=DT_OLD))
+    updated = dataclasses.replace(make_release(created_at=DT_NOW), quality="MP3-320")
+    second = rs.put(updated)
+
+    assert first == second
+    fetched = rs.get(second)
+    assert fetched is not None
+    assert fetched.created_at == DT_NOW
+    assert fetched.quality == "MP3-320"
+
+
+def test_release_id_differs_by_username_and_by_folder(stores, tmp_path):
+    rs, _ = stores(str(tmp_path / "db.sqlite"))
+    base = rs.put(make_release(username="u1", album_folder="A"))
+    other_user = rs.put(make_release(username="u2", album_folder="A"))
+    other_folder = rs.put(make_release(username="u1", album_folder="B"))
+
+    assert len({base, other_user, other_folder}) == 3
 
 
 # ---------------------------------------------------------------------------
