@@ -56,7 +56,7 @@ def create_sabnzbd_blueprint(
         if api_key is None:
             return None
         provided = request.args.get("apikey") or request.form.get("apikey")
-        if not hmac.compare_digest(provided or "", api_key):
+        if not hmac.compare_digest((provided or "").encode(), api_key.encode()):
             return jsonify({"status": False, "error": "API Key Incorrect"})
         return None
 

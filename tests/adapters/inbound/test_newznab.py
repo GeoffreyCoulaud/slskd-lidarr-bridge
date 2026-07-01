@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
+from urllib.parse import quote
 
 import flask
 
@@ -512,6 +513,52 @@ class TestApiKeyAuth:
         store._releases["test-id-001"] = release
         client = self._make_keyed_app(release_store=store).test_client()
         resp = client.get("/indexer/nzb/test-id-001?apikey=badkey")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.tag == "error"
+        assert root.get("code") == "100"
+
+
+# ---------------------------------------------------------------------------
+# Tests: non-ASCII API key (bytes comparison regression)
+# ---------------------------------------------------------------------------
+
+
+class TestApiKeyAuthNonAscii:
+    """Prove that hmac.compare_digest uses bytes so non-ASCII keys never raise.
+
+    Before the .encode() fix, compare_digest(str, str) raises TypeError for
+    non-ASCII characters, which the error handler swallows into a 900 envelope.
+    After the fix, both the correct-key and wrong-key paths behave correctly.
+    """
+
+    KEY = "clé-café-secrète"
+
+    def _make_keyed_app(
+        self,
+        search_service=None,
+        release_store=None,
+    ) -> flask.Flask:
+        return _make_app(
+            search_service=search_service,
+            release_store=release_store,
+            categories=[(3000, "Audio"), (3040, "Audio/Lossless")],
+            api_key=self.KEY,
+        )
+
+    def test_non_ascii_correct_key_returns_caps_not_900(self):
+        """Correct non-ASCII apikey reaches the caps handler, not the 900 envelope."""
+        client = self._make_keyed_app().test_client()
+        resp = client.get(f"/indexer/api?t=caps&apikey={quote(self.KEY)}")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        # <caps> — not <error code="900">
+        assert root.tag == "caps"
+
+    def test_non_ascii_wrong_key_returns_error_100_not_900(self):
+        """Wrong apikey with a non-ASCII configured key yields error 100, not 900."""
+        client = self._make_keyed_app().test_client()
+        resp = client.get("/indexer/api?t=caps&apikey=wrong")
         assert resp.status_code == 200
         root = ET.fromstring(resp.data)
         assert root.tag == "error"
