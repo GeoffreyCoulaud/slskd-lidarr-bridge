@@ -88,7 +88,7 @@ def create_newznab_blueprint(
         if api_key is None:
             return None
         provided = request.args.get("apikey")
-        if not hmac.compare_digest(provided or "", api_key):
+        if not hmac.compare_digest((provided or "").encode(), api_key.encode()):
             return Response(
                 build_error(100, "Incorrect API key"),
                 status=200,

@@ -87,7 +87,7 @@ class SlskdGateway:
         """Issue an HTTP request with every path segment percent-encoded.
 
         All callers pass path segments as positional strings; this method
-        encodes each one with ``quote(s, safe="")``) so no reserved character
+        encodes each one with ``quote(s, safe="")`` so no reserved character
         (``/``, ``?``, ``#``, ``..``, …) can escape its segment boundary.
         ``**kwargs`` are forwarded verbatim to ``httpx.Client.request``
         (e.g. ``json=``, ``params=``).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from urllib.parse import quote
 
 import flask
 
@@ -564,3 +565,39 @@ class TestApiKeyAuth:
         )
         assert resp.status_code == 200
         assert resp.get_json()["status"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: non-ASCII API key (bytes comparison regression)
+# ---------------------------------------------------------------------------
+
+
+class TestApiKeyAuthNonAscii:
+    """Prove that hmac.compare_digest uses bytes so non-ASCII keys never raise.
+
+    Before the .encode() fix, compare_digest(str, str) raises TypeError for
+    non-ASCII characters, which the error handler swallows into a 900 / JSON
+    internal-error envelope. After the fix both paths behave correctly.
+    """
+
+    KEY = "clé-café-secrète"
+
+    def _make_keyed_app(self, download_service=None) -> flask.Flask:
+        return _make_app(download_service=download_service, api_key=self.KEY)
+
+    def test_non_ascii_correct_key_returns_version_not_900(self):
+        """Correct non-ASCII apikey reaches the version handler, not the 900 error."""
+        client = self._make_keyed_app().test_client()
+        resp = client.get(f"/sabnzbd/api?mode=version&apikey={quote(self.KEY)}")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "version" in data
+
+    def test_non_ascii_wrong_key_returns_auth_error_not_900(self):
+        """Wrong apikey with a non-ASCII configured key yields auth error, not 900."""
+        client = self._make_keyed_app().test_client()
+        resp = client.get("/sabnzbd/api?mode=version&apikey=wrong")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] is False
+        assert data["error"] == "API Key Incorrect"
