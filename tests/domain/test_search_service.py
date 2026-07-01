@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from slskd_lidarr_bridge.domain.models import (
     AudioFile,
     Release,
@@ -38,14 +40,16 @@ class FakeGateway:
         self._default: list[SearchResponse] = responses or []
         self._by_text = responses_by_text or {}
         self.started_searches: list[str] = []
+        self.started_timeouts: list[float] = []
         self._sid_counter = 0
         self._sid_text: dict[str, str] = {}
         self._poll_counts: dict[str, int] = {}
 
-    def start_search(self, text: str) -> str:
+    def start_search(self, text: str, timeout_seconds: float) -> str:
         self._sid_counter += 1
         sid = f"search-{self._sid_counter}"
         self.started_searches.append(text)
+        self.started_timeouts.append(timeout_seconds)
         self._sid_text[sid] = text
         self._poll_counts[sid] = 0
         return sid
@@ -55,6 +59,71 @@ class FakeGateway:
         return self._poll_counts[search_id] >= self._completes_on
 
     def search_responses(self, search_id: str) -> list[SearchResponse]:
+        return list(self._by_text.get(self._sid_text[search_id], self._default))
+
+    # Unused in search service — satisfy Protocol
+    def enqueue(self, username: str, files: list[AudioFile]) -> None: ...
+    def transfers(self, username: str) -> list[Transfer]:
+        return []
+
+    def cancel(self, username: str, transfer_id: str) -> None: ...
+    def downloads_directory(self) -> str:
+        return "/downloads"
+
+
+class RacyGateway:
+    """SoulseekGateway that models slskd's real search lifecycle.
+
+    Unlike ``FakeGateway`` (which returns responses regardless of completion),
+    this fake mirrors the timing that broke the bridge end-to-end:
+
+    * a search reports ``isComplete`` only on the ``completes_after``-th poll —
+      i.e. slskd keeps gathering past its own search window;
+    * ``search_responses`` yields the mapped responses **only once the search has
+      completed**; a search the bridge abandons mid-flight returns ``[]``, exactly
+      as slskd has not yet populated ``/responses``;
+    * ``start_search`` for a 1-based index listed in ``fail_start_on`` raises,
+      modelling slskd's single-submission semaphore / Soulseek refusing a search
+      that arrives too soon (HTTP 429).
+    """
+
+    def __init__(
+        self,
+        *,
+        completes_after: int = 1,
+        responses_by_text: dict[str, list[SearchResponse]] | None = None,
+        default_responses: list[SearchResponse] | None = None,
+        fail_start_on: frozenset[int] = frozenset(),
+    ) -> None:
+        self._completes_after = completes_after
+        self._by_text = responses_by_text or {}
+        self._default = default_responses or []
+        self._fail_start_on = set(fail_start_on)
+        self.started_searches: list[str] = []
+        self.started_timeouts: list[float] = []
+        self._sid_counter = 0
+        self._sid_text: dict[str, str] = {}
+        self._poll_counts: dict[str, int] = {}
+
+    def start_search(self, text: str, timeout_seconds: float) -> str:
+        n = self._sid_counter + 1
+        if n in self._fail_start_on:
+            raise RuntimeError(f"slskd refused search #{n} (429 too soon)")
+        self._sid_counter = n
+        sid = f"search-{n}"
+        self.started_searches.append(text)
+        self.started_timeouts.append(timeout_seconds)
+        self._sid_text[sid] = text
+        self._poll_counts[sid] = 0
+        return sid
+
+    def search_is_complete(self, search_id: str) -> bool:
+        self._poll_counts[search_id] += 1
+        return self._poll_counts[search_id] >= self._completes_after
+
+    def search_responses(self, search_id: str) -> list[SearchResponse]:
+        if self._poll_counts[search_id] < self._completes_after:
+            return []  # abandoned before slskd finalised → nothing gathered yet
         return list(self._by_text.get(self._sid_text[search_id], self._default))
 
     # Unused in search service — satisfy Protocol
@@ -284,11 +353,12 @@ def test_polling_completes_on_third_check():
 
 
 def test_timeout_stops_polling_without_infinite_loop():
-    """When gateway never completes, service breaks after search_timeout."""
+    """When gateway never completes, service breaks after the completion wait."""
     gateway = FakeGateway(completes_on=9999, responses=[])
     store = FakeStore()
-    # advance 5 s per sleep so elapsed >= search_timeout=5 after the first sleep
-    clock = FakeClock(advance_per_sleep=5.0)
+    # advance 100 s per sleep so elapsed exceeds the completion wait (search
+    # window + grace) after a single sleep, whatever the grace constant is.
+    clock = FakeClock(advance_per_sleep=100.0)
     service = SearchService(
         gateway, store, clock, search_timeout=5, poll_interval=1.0, min_results=0
     )
@@ -298,7 +368,7 @@ def test_timeout_stops_polling_without_infinite_loop():
     assert result == []
     assert (
         len(clock.sleeps) == 1
-    )  # exactly one sleep: elapsed hits timeout after first advance
+    )  # exactly one sleep: elapsed hits the wait cap after first advance
 
 
 def test_timeout_logs_warning(caplog):
@@ -658,3 +728,153 @@ def test_dedup_same_user_folder_across_candidates_counts_once():
     releases = service.search(SearchQuery(artist="A", album="B"))
     assert len(releases) == 1  # deduped on (username, album_folder)
     assert len(gateway.started_searches) >= 2  # walked candidates (never reached 99)
+
+
+def test_primary_completing_after_slskd_window_is_captured_not_abandoned():
+    """The bridge must wait for slskd to finish, not race its own search window.
+
+    Regression for the end-to-end miss: ``search_timeout`` was used both as
+    slskd's search window (forwarded on the POST) and as the bridge's poll cap,
+    so the bridge gave up at the exact moment slskd was about to report a full
+    result set — fetching an empty ``/responses`` and firing a premature fallback
+    that Soulseek refuses. slskd here reports ``isComplete`` only on the 8th poll
+    (~7 s), past the 5 s window; the bridge must still capture all three folders
+    and issue no second search.
+    """
+    resp = make_response(
+        "alice", [make_flac("A", 1), make_flac("B", 1), make_flac("C", 1)]
+    )
+    gateway = RacyGateway(completes_after=8, responses_by_text={"Artist Album": [resp]})
+    service = SearchService(
+        gateway,
+        FakeStore(),
+        FakeClock(),
+        search_timeout=5,
+        poll_interval=1.0,
+        min_results=3,
+    )
+
+    releases = service.search(SearchQuery(artist="Artist", album="Album"))
+
+    assert len(releases) == 3  # full result set captured, not abandoned
+    assert gateway.started_searches == ["Artist Album"]  # no premature fallback
+
+
+def test_candidate_search_failure_preserves_earlier_results():
+    """A refused fallback must not discard results already collected.
+
+    The primary yields one folder (< min_results), so the loop advances to a
+    fallback whose submission slskd refuses (429). That failure must be swallowed
+    and the primary's release still returned — not propagated to abort the whole
+    search (which today loses even the results Lidarr should have seen).
+    """
+    resp = make_response("alice", [make_flac("OnlyOne", 1)])
+    gateway = RacyGateway(
+        completes_after=1,
+        responses_by_text={"Artist Album": [resp]},
+        fail_start_on=frozenset({2}),
+    )
+    service = SearchService(
+        gateway, FakeStore(), FakeClock(), search_timeout=5, min_results=3
+    )
+
+    releases = service.search(SearchQuery(artist="Artist", album="Album"))
+
+    assert [r.album_folder for r in releases] == ["OnlyOne"]  # primary survives
+    assert gateway.started_searches == ["Artist Album"]  # fallback #2 was refused
+
+
+def test_primary_search_failure_propagates_when_nothing_collected():
+    """If the very first search fails and nothing was collected, the error must
+    propagate so the Lidarr surfaces return an error envelope, not a false
+    'no results'."""
+    gateway = RacyGateway(fail_start_on=frozenset({1}))  # primary refused
+    service = SearchService(gateway, FakeStore(), FakeClock(), search_timeout=5)
+
+    with pytest.raises(RuntimeError, match="refused search #1"):
+        service.search(SearchQuery(artist="Artist", album="Album"))
+
+
+# ---------------------------------------------------------------------------
+# Per-search window sizing (what searchTimeout is forwarded to slskd)
+# ---------------------------------------------------------------------------
+
+
+def test_default_search_takes_whole_remaining_budget():
+    # search_timeout=0 (default) → no per-query cap → each search is sized to the
+    # remaining budget minus the inter-search margin (75 - 5 = 70).
+    resp = make_response("alice", [make_flac("Folder", 1)])
+    gateway = RacyGateway(completes_after=1, default_responses=[resp])
+    service = SearchService(
+        gateway,
+        FakeStore(),
+        FakeClock(),
+        search_timeout=0,
+        search_budget=75,
+        min_results=99,
+    )
+
+    service.search(SearchQuery(artist="Artist", album="Album"))
+
+    assert gateway.started_timeouts[0] == 70.0
+
+
+def test_per_query_cap_limits_each_search_window():
+    # A positive search_timeout caps every search so several fallbacks fit.
+    resp = make_response("alice", [make_flac("Folder", 1)])
+    gateway = RacyGateway(completes_after=1, default_responses=[resp])
+    service = SearchService(
+        gateway,
+        FakeStore(),
+        FakeClock(),
+        search_timeout=30,
+        search_budget=75,
+        min_results=99,
+    )
+
+    service.search(SearchQuery(artist="Artist", album="Album"))
+
+    assert gateway.started_timeouts  # at least the primary ran
+    assert all(t == 30.0 for t in gateway.started_timeouts)
+
+
+def test_fallback_windows_shrink_to_fit_remaining_budget():
+    # Each search burns ~30 s of wall clock. With a 30 s cap and a 75 s budget:
+    # primary(30) + fallback(30) leaves 15 s, so the third search is truncated to
+    # the remaining budget minus the margin (15 - 5 = 10) instead of being skipped.
+    resp = make_response("alice", [make_flac("Folder", 1)])
+    gateway = RacyGateway(completes_after=31, default_responses=[resp])
+    clock = FakeClock(advance_per_sleep=1.0)
+    service = SearchService(
+        gateway,
+        FakeStore(),
+        clock,
+        search_timeout=30,
+        search_budget=75,
+        poll_interval=1.0,
+        min_results=99,
+    )
+
+    service.search(SearchQuery(artist="Beyonce", album="Lemonade (Deluxe)"))
+
+    assert gateway.started_timeouts == [30.0, 30.0, 10.0]
+
+
+def test_primary_still_runs_with_a_floored_window_when_budget_tiny():
+    # A misconfigured tiny budget must not starve the primary below slskd's 5 s
+    # minimum search window.
+    resp = make_response("alice", [make_flac("Folder", 1)])
+    gateway = RacyGateway(completes_after=1, default_responses=[resp])
+    service = SearchService(
+        gateway,
+        FakeStore(),
+        FakeClock(),
+        search_timeout=0,
+        search_budget=0,
+        min_results=99,
+    )
+
+    releases = service.search(SearchQuery(artist="Artist", album="Album"))
+
+    assert gateway.started_timeouts == [5.0]  # primary floored, no fallback
+    assert len(releases) == 1

@@ -62,6 +62,11 @@ def _fold(text: str) -> str:
 
 
 def generate_candidates(query: SearchQuery) -> list[str]:
+    # Build in precision order (raw first, loosest last). A plain list — not a
+    # set — because ordering is contractual: the raw candidate must always run
+    # first as the primary. The final loop below deduplicates while preserving
+    # this order, so a set here would only trade the ordering guarantee for
+    # nothing.
     candidates = [query.to_search_text()]
     if query.term is None:
         artist = query.artist or ""
@@ -72,6 +77,7 @@ def generate_candidates(query: SearchQuery) -> list[str]:
         candidates.append(_fold(stripped))
     else:
         candidates.append(_fold(_strip_editions(query.term)))
+
     seen: set[str] = set()
     result: list[str] = []
     for c in candidates:

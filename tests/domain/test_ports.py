@@ -24,7 +24,7 @@ from slskd_lidarr_bridge.domain.ports import (
 
 
 class _StubSoulseekGateway:
-    def start_search(self, text: str) -> str:
+    def start_search(self, text: str, timeout_seconds: float) -> str:
         return "search-id"
 
     def search_is_complete(self, search_id: str) -> bool:

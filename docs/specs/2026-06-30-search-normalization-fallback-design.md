@@ -56,32 +56,57 @@ candidates = generate_candidates(query)        # ordered, string-deduplicated
 results: dict[(username, album_folder), Release] = {}
 start = clock.now()
 for index, cand in enumerate(candidates):
-    if index > 0:                                # the primary (index 0) always runs
-        if len(results) >= min_results: break    # gating on cumulative distinct results
-        if (clock.now() - start).total_seconds() >= search_budget: break   # wall-clock guard
-    remaining = search_budget - (clock.now() - start).total_seconds()
-    max_seconds = search_timeout if index == 0 else min(search_timeout, max(remaining, 0))
-    responses = run_search(cand, max_seconds)    # start + poll, bounded (existing poll logic)
+    elapsed = (clock.now() - start).total_seconds()
+    window = search_window(search_budget - elapsed)   # remaining − margin, opt. capped
+    if index == 0:
+        window = max(window, MIN_SEARCH_WINDOW)  # the primary always runs
+    else:
+        if len(results) >= min_results: break    # enough distinct results
+        if window < MIN_SEARCH_WINDOW: break      # not enough budget for a real search
+    try:
+        responses = run_search(cand, window)     # forwards `window` to slskd; polls it
+    except Exception:
+        if not results: raise                    # total failure → Lidarr error envelope
+        break                                    # keep earlier results, stop walking
     for release parsed from responses:
         key = (username, album_folder)
         if key in results: continue              # dedup BEFORE store.put()
         store.put(release); results[key] = release
 return sort(results.values())                    # existing (free slot, speed, queue) order
+
+search_window(remaining) = min(remaining − INTER_SEARCH_MARGIN, search_timeout or ∞)
+run_search(cand, window):  start_search(cand, window)   # slskd's searchTimeout = window
+                           poll until isComplete, cap = window + COMPLETION_GRACE
 ```
 
-- **The primary candidate (index 0) always runs**, with the full `search_timeout`
-  — it is today's behaviour, the baseline. The gating and budget checks apply only
-  to *subsequent* (fallback) candidates.
-- **Gating counts distinct releases** (the user's "total results"): once
-  `len(results) >= min_results`, no further candidate starts.
+- **Each search takes the wall-clock time still available**, sized as
+  `min(remaining_budget − margin, search_timeout)`. The window is forwarded to
+  slskd *per call* as its `searchTimeout`, so slskd stops gathering exactly when
+  the bridge stops polling — no lingering search to 429 the next candidate.
+  **Correction (root cause of the end-to-end miss):** the original draft used a
+  single fixed `search_timeout` both as slskd's window *and* the bridge's poll
+  cap, so the bridge abandoned the primary at the instant slskd finalised, fetched
+  an empty `/responses`, and fired a premature fallback that slskd refused (429).
+- **`search_timeout` is now an *optional per-query maximum*, default `0` (no
+  cap).** With no cap, a search uses the whole remaining budget — slskd's native
+  one-search-per-query behaviour, which already works most of the time. A positive
+  value caps each search so several looser candidates fit inside the budget.
+- **The primary candidate (index 0) always runs**, floored at `MIN_SEARCH_WINDOW`
+  (slskd's 5 s minimum) so a tight budget can't starve it.
+- **Gating counts distinct releases**: once `len(results) >= min_results`, no
+  further candidate starts.
+- **A candidate's search failing is non-fatal *unless nothing is collected yet*.**
+  A later, looser candidate that 429s / errors must not discard the earlier,
+  higher-precision results — log and stop. But if the *first* search fails with an
+  empty result set, the error propagates so Lidarr gets an error envelope rather
+  than a false "no results".
 - **Dedup key is `(username, album_folder)`**, applied *before* `store.put()` — a
   re-surfaced offer must not create duplicate DB rows / NZBs. First occurrence
   wins (it comes from the higher-precision earlier candidate). Decided.
-- **Each fallback is capped at `min(search_timeout, remaining)`** where
-  `remaining = search_budget - elapsed`, so total wall-clock ≈
-  `max(search_timeout, search_budget)`. With the expected config
-  (`search_budget` ≥ `search_timeout`) the total stays ≈ `search_budget`; the
-  primary alone is always the floor.
+- **A fallback only starts if its window is worthwhile** (`window >=
+  MIN_SEARCH_WINDOW`), and every window is bounded by the remaining budget minus a
+  margin, so total wall-clock stays under `search_budget` (kept under Lidarr's
+  100 s abort).
 - **Final ranking is unchanged** — the existing `(has_free_upload_slot,
   upload_speed, -queue_length)` sort applied to the deduplicated set.
 - `purge_older_than` runs once at the top, as today (not per candidate).
@@ -123,23 +148,27 @@ transformation is dropped.
 | Var | Default | Meaning |
 |---|---|---|
 | `BRIDGE_MIN_RESULTS` | `3` | Stop issuing further candidates once this many distinct releases have accumulated. |
-| `BRIDGE_SEARCH_BUDGET` | `75` | Wall-clock seconds gating the **fallback** candidates (the primary always runs). Chosen for ~25 s headroom under Lidarr's hardcoded 100 s indexer-request abort. `<= 0` means "primary only" — fallbacks disabled, today's single-search behaviour. |
+| `BRIDGE_SEARCH_BUDGET` | `75` | Total wall-clock seconds for the whole search across all candidates. Each candidate takes the remaining budget (minus a margin). Chosen for ~25 s headroom under Lidarr's hardcoded 100 s indexer-request abort. |
+| `SLSKD_SEARCH_TIMEOUT` | `0` | Optional per-query **maximum** seconds. `0` = no cap → each search uses the whole remaining budget (slskd's native single-search behaviour). A positive value (≥ slskd's 5 s minimum) caps each search so several looser fallback candidates fit within the budget. |
 
-Wired through `create_app` into `SearchService(min_results=…, search_budget=…)`.
-Both documented in the README env-var table.
+Wired through `create_app` into
+`SearchService(min_results=…, search_budget=…, search_timeout=…)`. All documented
+in the README env-var table.
 
 ### Code structure
 
 - **New** `domain/query_candidates.py` — pure, no I/O: `generate_candidates` plus
   private `_strip_editions`, `_fold`. Testable in isolation.
 - `SearchService`:
-  - `__init__` gains `min_results: int = 3`, `search_budget: int = 75`.
-  - `search()` refactored into the candidate loop. Extract two private helpers to
-    keep each unit focused: `_run_search(text, max_seconds) -> list[SearchResponse]`
-    (start + bounded poll) and `_responses_to_releases(responses, seen) ->
-    list[Release]` (the current per-response audio filter / folder grouping /
-    artist-album derivation / `min_bitrate` / dedup — moved verbatim, not
-    behaviourally changed).
+  - `__init__` gains `min_results: int = 3`, `search_budget: int = 75`,
+    `search_timeout: int = 0` (the optional per-query cap).
+  - `search()` is a candidate loop. Private helpers keep each unit focused:
+    `_search_window(remaining) -> float` (window sizing), `_run_search(text,
+    window) -> list[SearchResponse]` (forward the window to slskd + bounded poll),
+    and `_collect(responses, seen, tagged)` (per-response audio filter / folder
+    grouping / artist-album derivation / `min_bitrate` / dedup).
+- `SlskdGateway.start_search(text, timeout_seconds)` forwards the per-call window
+  as slskd's `searchTimeout` (ms); the gateway no longer holds a fixed timeout.
 - `SearchQuery` stays a passive dataclass; the candidate module reads its fields.
 
 ### Safety: why loose candidates are not dangerous

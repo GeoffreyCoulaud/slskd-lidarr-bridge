@@ -18,7 +18,7 @@ CREATED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 class FakeGateway:
-    def start_search(self, text: str) -> str:
+    def start_search(self, text: str, timeout_seconds: float) -> str:
         return "sid-fake"
 
     def search_is_complete(self, sid: str) -> bool:
@@ -76,7 +76,7 @@ class FakeClock:
 class ExplodingGateway:
     """Gateway that raises on search and transfers — used for error handler tests."""
 
-    def start_search(self, text: str) -> str:
+    def start_search(self, text: str, timeout_seconds: float) -> str:
         raise RuntimeError("gateway search boom")
 
     def search_is_complete(self, sid: str) -> bool:
