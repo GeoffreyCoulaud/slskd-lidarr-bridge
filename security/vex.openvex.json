@@ -3,6 +3,93 @@
   "@id": "https://github.com/GeoffreyCoulaud/slskd-lidarr-bridge/blob/main/security/vex.openvex.json",
   "author": "GeoffreyCoulaud",
   "timestamp": "2026-07-01T00:00:00Z",
-  "version": 1,
-  "statements": []
+  "version": 3,
+  "statements": [
+    {
+      "vulnerability": { "name": "CVE-2025-15366" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "imaplib is never imported (verified across src/). The bridge is a Newznab/SABnzbd HTTP service with no IMAP client, so the injectable command path is unreachable."
+    },
+    {
+      "vulnerability": { "name": "CVE-2025-15367" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "poplib is never imported (verified across src/). The service speaks no POP3, so the injectable command path is unreachable."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-0864" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "configparser is never imported (verified across src/). Configuration comes from environment variables and is never written to .ini files, so no attacker-controlled value is serialized through configparser."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-11940" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "tarfile is never imported (verified across src/). The app extracts no archives, so tarfile.extractall and its symlink-escape path are never reached."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-11972" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "tarfile is never imported (verified across src/). No archive parsing occurs, so the streaming-mode EOF denial-of-service is unreachable."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-12003" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "This is a Windows-specific privilege escalation via the PCbuild VPATH landmark. The image is a Linux build; /usr/local is root-owned and immutable at runtime while the process runs as unprivileged nobody (65534), so no adversary can plant the landmark or an alternative Lib directory."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-1502" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The flaw is in the stdlib http.client proxy-tunnel/host header path. All HTTP egress uses httpx (httpcore), not http.client, and no proxy is configured. The only http.client use is the Dockerfile healthcheck against a fixed localhost URL with no proxy and no adversary-controlled host or headers."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-3298" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "asyncio.ProactorEventLoop is Windows-only and the advisory states non-Windows platforms are not affected. The image is Linux (SelectorEventLoop); the app also does not use asyncio at all."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-4786" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "webbrowser is never imported (verified across src/). A headless server never calls webbrowser.open, so the shell-injection path is unreachable."
+    },
+    {
+      "vulnerability": { "name": "CVE-2026-6100" },
+      "products": [ { "@id": "pkg:oci/slskd-lidarr-bridge", "subcomponents": [ { "@id": "pkg:generic/python" } ] } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The use-after-free requires re-using an lzma/bz2/gzip decompressor instance after a MemoryError. None of lzma, bz2 or gzip is imported (verified across src/); httpx decodes gzip/deflate responses with per-response one-shot zlib decoders, which the advisory explicitly lists as not affected."
+    },
+    {
+      "vulnerability": { "name": "CVE-2025-60876" },
+      "products": [
+        {
+          "@id": "pkg:oci/slskd-lidarr-bridge",
+          "subcomponents": [
+            { "@id": "pkg:apk/alpine/busybox" },
+            { "@id": "pkg:apk/alpine/busybox-binsh" },
+            { "@id": "pkg:apk/alpine/ssl_client" }
+          ]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flaw is in BusyBox wget (CRLF injection in the HTTP request-target). The container CMD execs the Python interpreter directly (exec form, no shell); the app spawns no subprocess and never invokes wget or any BusyBox applet. The healthcheck uses Python's urllib, not wget."
+    }
+  ]
 }

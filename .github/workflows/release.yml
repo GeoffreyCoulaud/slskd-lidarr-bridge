@@ -90,9 +90,10 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      - name: Generate SBOM (OS + Python via Syft)
-        # Scans the final pushed image; Syft catalogues both dpkg (OS) and
-        # dist-info (Python) packages — no lockfile/base merge needed.
+      - name: Generate CycloneDX SBOM (standard, for external consumers)
+        # Scans the final pushed image; Syft catalogues both apk (OS) and
+        # dist-info (Python) packages plus the CPython binary — no lockfile
+        # merge needed. CycloneDX is the portable interchange format.
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: ${{ steps.image.outputs.ref }}
@@ -102,12 +103,33 @@ jobs:
           registry-username: ${{ github.actor }}
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Attest SBOM (keyless OIDC via cosign)
-        # Attaches the SBOM as a signed attestation on the pushed image.
-        # Requires id-token: write (OIDC) and packages: write (push to GHCR).
+      - name: Generate Syft-JSON SBOM (native, for the VEX-aware daily scan)
+        # Syft's native format preserves the image source identity
+        # (ImageMetadata: tags + repoDigests). Grype needs that to resolve
+        # image-scoped OpenVEX statements (pkg:oci/... products); CycloneDX
+        # drops it, so the daily scan reads THIS SBOM, not the CycloneDX one.
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ steps.image.outputs.ref }}
+          format: syft-json
+          output-file: /tmp/sbom.syft.json
+          upload-artifact: "false"
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest SBOMs and VEX (keyless OIDC via cosign)
+        # Three signed attestations on the pushed image (needs id-token: write
+        # for OIDC and packages: write to push to GHCR):
+        #   - CycloneDX  : the standard SBOM for external consumers
+        #   - Syft-JSON  : consumed by grype-scan.yml (preserves image identity
+        #                  so image-scoped VEX filters correctly)
+        #   - OpenVEX    : so anyone scanning this image directly inherits the
+        #                  not_affected triage in security/vex.openvex.json
         run: |
-          cosign attest \
-            --type cyclonedx \
-            --predicate /tmp/sbom.cyclonedx.json \
-            --yes \
-            "${{ steps.image.outputs.ref }}"
+          ref='${{ steps.image.outputs.ref }}'
+          cosign attest --yes --type cyclonedx \
+            --predicate /tmp/sbom.cyclonedx.json "$ref"
+          cosign attest --yes --type https://syft.dev/bom \
+            --predicate /tmp/sbom.syft.json "$ref"
+          cosign attest --yes --type openvex \
+            --predicate security/vex.openvex.json "$ref"
