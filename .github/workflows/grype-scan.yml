@@ -31,10 +31,12 @@ jobs:
         # Retrieves the signed CycloneDX SBOM that was attached to the image
         # during the release workflow. jq decodes the base64 payload and extracts
         # the predicate, which is the raw SBOM document.
+        # CERT_REGEXP keeps the repository's original case (the OIDC cert
+        # identity preserves it); IMAGE is lowercased below (OCI refs must be).
         env:
-          IMAGE: ghcr.io/${{ github.repository }}:latest
           CERT_REGEXP: "^${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@refs/"
         run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:latest"
           cosign verify-attestation \
             --type cyclonedx \
             --certificate-identity-regexp "${CERT_REGEXP}" \
