@@ -44,8 +44,6 @@ class Config:
         timer keeps resetting — completes once this many peers have responded,
         instead of running until the wall-clock budget. Default 100 (aligned with
         the Newznab caps limit); ``<= 0`` omits it (slskd default 250).
-    db_path:
-        Path to the SQLite database file (default ``/data/bridge.db``).
     min_bitrate:
         Minimum acceptable bitrate in kbps; ``None`` means no filter.
     stall_timeout:
@@ -57,9 +55,9 @@ class Config:
     log_level:
         Root logging level name (e.g. ``INFO``, ``DEBUG``). Always a valid,
         upper-cased ``logging`` level name; defaults to ``INFO``.
-    min_results:
-        Stop issuing fallback candidates once this many distinct releases have
-        accumulated. Defaults to 3.
+    enough_results:
+        Stop issuing broader fallback candidates once this many distinct releases
+        have accumulated. The primary query always runs. Defaults to 3.
     search_budget:
         Total wall-clock seconds for the whole search across all candidates; kept
         under Lidarr's hardcoded 100 s indexer-request abort. Each candidate takes
@@ -76,12 +74,11 @@ class Config:
     categories: list[tuple[int, str]]
     bridge_port: int
     search_timeout: int
-    db_path: str
     min_bitrate: int | None
     stall_timeout: int
     max_retries: int
     log_level: str
-    min_results: int
+    enough_results: int
     search_budget: int
     api_key: str | None = None
     response_limit: int = 100
@@ -118,12 +115,11 @@ class Config:
             categories=list(_DEFAULT_CATEGORIES),
             bridge_port=int(env.get("BRIDGE_PORT", "8765")),
             search_timeout=int(env.get("SLSKD_SEARCH_TIMEOUT", "15")),
-            db_path=env.get("BRIDGE_DB_PATH", "/data/bridge.db"),
             min_bitrate=min_bitrate,
             stall_timeout=int(env.get("BRIDGE_STALL_TIMEOUT", "1800")),
             max_retries=int(env.get("BRIDGE_MAX_RETRIES", "1")),
             log_level=log_level,
-            min_results=int(env.get("BRIDGE_MIN_RESULTS", "3")),
+            enough_results=int(env.get("BRIDGE_ENOUGH_RESULTS", "3")),
             search_budget=int(env.get("BRIDGE_SEARCH_BUDGET", "75")),
             api_key=api_key,
             response_limit=int(env.get("SLSKD_RESPONSE_LIMIT", "100")),

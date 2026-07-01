@@ -34,9 +34,6 @@ RUN mkdir -p /data && chown 65534:65534 /data
 
 EXPOSE 8765
 
-# Default database path; override with BRIDGE_DB_PATH if desired
-ENV BRIDGE_DB_PATH=/data/bridge.db
-
 # Healthcheck uses venv python (no curl/wget dependency); reads BRIDGE_PORT at runtime
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD ["/app/.venv/bin/python","-c","import os,urllib.request; urllib.request.urlopen('http://localhost:%s/health' % os.environ.get('BRIDGE_PORT','8765'))"]

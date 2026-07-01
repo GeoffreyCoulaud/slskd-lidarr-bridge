@@ -2,14 +2,12 @@
 
 A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Soulseek daemon) look like Usenet to [Lidarr](https://lidarr.audio/). It impersonates a **Newznab indexer** and a **SABnzbd download client**, so Lidarr searches, downloads, and tracks music from Soulseek using its normal Usenet workflow.
 
+> [!NOTE]
 > **A note on authorship:** Almost all of the code in this repository was written by AI coding agents, under human direction and review. The conventions and architectural guardrails those agents follow are documented in [AGENTS.md](AGENTS.md).
 
 ## Docker Compose
 
 The bridge discovers slskd's completed-downloads directory from slskd's API, so it needs no downloads volume of its own — it only reports paths to Lidarr, it never reads the files. The shared volume is between **slskd and Lidarr** (see [Completed-downloads path](#3-completed-downloads-path) below).
-
-> **slskd API key role:** create the key in slskd with the **`readwrite`** role — the bridge issues reads (search, status) and writes (enqueue/cancel downloads). As of slskd `0.25.x` the endpoints the bridge calls only require an authenticated key (the `Any` policy — no specific role is enforced yet), so any role technically works, but `readwrite` is the correct, future-proof choice for a client that writes.
-
 
 ```yaml
 services:
@@ -36,6 +34,10 @@ volumes:
   bridge-data:
 ```
 
+> [!NOTE]
+> **slskd API key role:** create the key in slskd with the **`readwrite`** role — the bridge issues reads (search, status) and writes (enqueue/cancel downloads). As of slskd `0.25.x` the endpoints the bridge calls only require an authenticated key (the `Any` policy — no specific role is enforced yet), so any role technically works, but `readwrite` is the correct, future-proof choice for a client that writes.
+
+> [!IMPORTANT]
 > **Bind-mount users:** the bridge runs as `nobody` (UID/GID 65534). If you
 > mount a host directory instead of a named volume, the process won't be able
 > to write the database unless you set the ownership first:
@@ -89,17 +91,16 @@ Lidarr must be able to read that path. If slskd and Lidarr see the downloads on 
 |---|---|---|---|
 | `SLSKD_URL` | yes | - | Base URL of the slskd instance (e.g. `http://slskd:5030`) |
 | `SLSKD_API_KEY` | yes | - | API key for slskd authentication |
-| `BRIDGE_PORT` | no | `8765` | TCP port for the bridge HTTP server |
-| `SLSKD_SEARCH_TIMEOUT` | no | `15` | slskd's **idle** search window in seconds, forwarded as `searchTimeout` (in ms). slskd completes a search after this many seconds with **no new response** — the timer *resets on every response*, so it is NOT a wall-clock cap and must stay small (never the whole budget, or a busy query never completes). `0` omits it so slskd uses its own default (15 s); positive values must be ≥ slskd's 5 s minimum |
-| `SLSKD_RESPONSE_LIMIT` | no | `100` | `responseLimit` sent on every search so a popular query — whose idle timer keeps resetting as peers reply — completes once this many peers have responded, instead of running until `BRIDGE_SEARCH_BUDGET`. `0` omits it (slskd default 250) |
-| `BRIDGE_DB_PATH` | no | `/data/bridge.db` | Path to the SQLite database file |
-| `BRIDGE_MIN_BITRATE` | no | _(none)_ | Minimum acceptable bitrate in kbps; only files with a **known** bitrate below this threshold are filtered out. Lossless and unknown-bitrate files always pass (slskd's bitrate field is often absent, especially for FLAC) |
-| `BRIDGE_MIN_RESULTS` | no | `3` | Stop issuing further (looser) fallback search queries once this many distinct releases have accumulated. The primary query always runs |
-| `BRIDGE_SEARCH_BUDGET` | no | `75` | Total wall-clock budget for the whole search across all candidates. It is the bridge's **poll cap** — how long it waits for each candidate's `isComplete` (completion itself is driven by `SLSKD_SEARCH_TIMEOUT` + `SLSKD_RESPONSE_LIMIT`, not by this value). Keeps total search latency under Lidarr's ~100 s indexer-request abort, so keep it well under 100 |
-| `BRIDGE_STALL_TIMEOUT` | no | `1800` | Seconds a download may make **no progress** before the bridge reports it failed, so Lidarr stops waiting on a dead/offline peer and can try another release. `0` disables the check |
-| `BRIDGE_MAX_RETRIES` | no | `1` | Times a failed transfer is re-enqueued on slskd before the download is reported failed to Lidarr (Soulseek transfers fail transiently). `0` fails on the first error |
-| `BRIDGE_API_KEY` | no | _(none)_ | Shared API key for the Newznab indexer and SABnzbd surfaces. Blank or unset = no authentication required. When set, configure the **same value** in both Lidarr's Newznab and SABnzbd API-key fields |
-| `LOG_LEVEL` | no | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); applies to the bridge and its dependencies (e.g. httpx) |
+| `BRIDGE_PORT` | no | `8765` | TCP port the bridge listens on |
+| `SLSKD_SEARCH_TIMEOUT` | no | `15` | slskd's **idle** search window (seconds): a search completes after this long with no new response. The timer resets on every response, so keep it small — it is not a wall-clock cap. `0` uses slskd's default; positive values must be ≥ 5 |
+| `SLSKD_RESPONSE_LIMIT` | no | `100` | Complete a search once this many peers have responded. `0` uses slskd's default (250) |
+| `BRIDGE_MIN_BITRATE` | no | _(none)_ | Drop files whose **known** bitrate is below this (kbps). Lossless and unknown-bitrate files always pass |
+| `BRIDGE_ENOUGH_RESULTS` | no | `3` | Stop issuing broader fallback queries once this many distinct releases have accumulated. The primary query always runs |
+| `BRIDGE_SEARCH_BUDGET` | no | `75` | Total wall-clock seconds for the whole search across all candidates. Keep well under Lidarr's ~100 s indexer-request abort |
+| `BRIDGE_STALL_TIMEOUT` | no | `1800` | Report a download failed after this many seconds with **no progress**, so Lidarr can try another release. `0` disables the check |
+| `BRIDGE_MAX_RETRIES` | no | `1` | Times a failed transfer is re-enqueued before it is reported failed to Lidarr. `0` fails on the first error |
+| `BRIDGE_API_KEY` | no | _(none)_ | Shared key for the Newznab and SABnzbd surfaces. Unset = no auth; when set, use the **same value** in both Lidarr fields |
+| `LOG_LEVEL` | no | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); applies to the bridge and its dependencies |
 
 
 ## Limitations

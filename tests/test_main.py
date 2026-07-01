@@ -10,6 +10,7 @@ import waitress
 from flask import Flask
 
 from slskd_lidarr_bridge import main as main_module
+from slskd_lidarr_bridge.adapters.outbound import sqlite_store
 from slskd_lidarr_bridge.main import build_app
 
 
@@ -19,9 +20,8 @@ class TestBuildApp:
         env = {
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
-            "BRIDGE_DB_PATH": db_path,
         }
-        app = build_app(env)
+        app = build_app(env, db_path=db_path)
         client = app.test_client()
         resp = client.get("/health")
         assert resp.status_code == 200
@@ -33,9 +33,8 @@ class TestBuildApp:
         env = {
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
-            "BRIDGE_DB_PATH": db_path,
         }
-        app = build_app(env)
+        app = build_app(env, db_path=db_path)
         client = app.test_client()
         resp = client.get("/indexer/api?t=caps")
         assert resp.status_code == 200
@@ -47,9 +46,8 @@ class TestBuildApp:
         env = {
             "SLSKD_URL": "http://localhost:5030",
             "SLSKD_API_KEY": "test-key",
-            "BRIDGE_DB_PATH": db_path,
         }
-        app = build_app(env)
+        app = build_app(env, db_path=db_path)
         client = app.test_client()
         resp = client.get("/sabnzbd/api?mode=version")
         assert resp.status_code == 200
@@ -72,7 +70,9 @@ class TestMain:
     def _set_env(self, monkeypatch, tmp_path, port="9999"):
         monkeypatch.setenv("SLSKD_URL", "http://localhost:5030")
         monkeypatch.setenv("SLSKD_API_KEY", "test-key")
-        monkeypatch.setenv("BRIDGE_DB_PATH", str(tmp_path / "bridge.db"))
+        monkeypatch.setattr(
+            sqlite_store, "DEFAULT_DB_PATH", str(tmp_path / "bridge.db")
+        )
         monkeypatch.setenv("BRIDGE_PORT", port)
 
     def test_main_serves_wired_app_on_configured_host_and_port(
@@ -127,7 +127,9 @@ class TestLoggingSetup:
     def _set_env(self, monkeypatch, tmp_path):
         monkeypatch.setenv("SLSKD_URL", "http://localhost:5030")
         monkeypatch.setenv("SLSKD_API_KEY", "test-key")
-        monkeypatch.setenv("BRIDGE_DB_PATH", str(tmp_path / "bridge.db"))
+        monkeypatch.setattr(
+            sqlite_store, "DEFAULT_DB_PATH", str(tmp_path / "bridge.db")
+        )
 
     def test_main_configures_logging_with_default_info(self, monkeypatch, tmp_path):
         self._set_env(monkeypatch, tmp_path)

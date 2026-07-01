@@ -344,7 +344,7 @@ def test_polling_completes_on_third_check():
     store = FakeStore()
     clock = FakeClock()
     service = SearchService(
-        gateway, store, clock, search_timeout=30, poll_interval=1.0, min_results=1
+        gateway, store, clock, search_timeout=30, poll_interval=1.0, enough_results=1
     )
 
     service.search(SearchQuery(artist="A", album="B"))
@@ -360,7 +360,7 @@ def test_timeout_stops_polling_without_infinite_loop():
     # window + grace) after a single sleep, whatever the grace constant is.
     clock = FakeClock(advance_per_sleep=100.0)
     service = SearchService(
-        gateway, store, clock, search_timeout=5, poll_interval=1.0, min_results=0
+        gateway, store, clock, search_timeout=5, poll_interval=1.0, enough_results=0
     )
 
     result = service.search(SearchQuery(artist="A", album="B"))
@@ -377,7 +377,7 @@ def test_timeout_logs_warning(caplog):
     store = FakeStore()
     clock = FakeClock(advance_per_sleep=5.0)
     service = SearchService(
-        gateway, store, clock, search_timeout=5, poll_interval=1.0, min_results=0
+        gateway, store, clock, search_timeout=5, poll_interval=1.0, enough_results=0
     )
 
     with caplog.at_level(logging.WARNING):
@@ -689,7 +689,7 @@ def test_walks_to_fallback_when_primary_returns_too_few():
     )
     store = FakeStore()
     clock = FakeClock()
-    service = SearchService(gateway, store, clock, min_results=3)
+    service = SearchService(gateway, store, clock, enough_results=3)
 
     releases = service.search(SearchQuery(artist="Beyonce", album="Lemonade (Deluxe)"))
 
@@ -699,13 +699,13 @@ def test_walks_to_fallback_when_primary_returns_too_few():
 
 
 def test_stops_at_threshold_after_primary():
-    # Primary alone yields 3 folders (= min_results) → no fallback issued.
+    # Primary alone yields 3 folders (= enough_results) → no fallback issued.
     resp = make_response(
         "alice",
         [make_flac("A", 1), make_flac("B", 1), make_flac("C", 1)],
     )
     gateway = FakeGateway(completes_on=1, responses_by_text={"X Y": [resp]})
-    service = SearchService(gateway, FakeStore(), FakeClock(), min_results=3)
+    service = SearchService(gateway, FakeStore(), FakeClock(), enough_results=3)
     releases = service.search(SearchQuery(artist="X", album="Y"))
     assert len(releases) == 3
     assert gateway.started_searches == ["X Y"]  # exactly one search
@@ -715,7 +715,7 @@ def test_budget_zero_runs_primary_only():
     resp = make_response("alice", [make_flac("Album", 1)])
     gateway = FakeGateway(completes_on=1, responses=[resp])
     service = SearchService(
-        gateway, FakeStore(), FakeClock(), min_results=99, search_budget=0
+        gateway, FakeStore(), FakeClock(), enough_results=99, search_budget=0
     )
     service.search(SearchQuery(artist="A", album="B"))
     assert len(gateway.started_searches) == 1  # fallbacks disabled by budget<=0
@@ -725,7 +725,7 @@ def test_dedup_same_user_folder_across_candidates_counts_once():
     resp = make_response("alice", [make_flac("Album", 1)])
     # Same response for primary and every fallback text.
     gateway = FakeGateway(completes_on=1, responses=[resp])
-    service = SearchService(gateway, FakeStore(), FakeClock(), min_results=99)
+    service = SearchService(gateway, FakeStore(), FakeClock(), enough_results=99)
     releases = service.search(SearchQuery(artist="A", album="B"))
     assert len(releases) == 1  # deduped on (username, album_folder)
     assert len(gateway.started_searches) >= 2  # walked candidates (never reached 99)
@@ -752,7 +752,7 @@ def test_primary_completing_after_slskd_window_is_captured_not_abandoned():
         FakeClock(),
         search_timeout=5,
         poll_interval=1.0,
-        min_results=3,
+        enough_results=3,
     )
 
     releases = service.search(SearchQuery(artist="Artist", album="Album"))
@@ -764,7 +764,7 @@ def test_primary_completing_after_slskd_window_is_captured_not_abandoned():
 def test_candidate_search_failure_preserves_earlier_results():
     """A refused fallback must not discard results already collected.
 
-    The primary yields one folder (< min_results), so the loop advances to a
+    The primary yields one folder (< enough_results), so the loop advances to a
     fallback whose submission slskd refuses (429). That failure must be swallowed
     and the primary's release still returned — not propagated to abort the whole
     search (which today loses even the results Lidarr should have seen).
@@ -776,7 +776,7 @@ def test_candidate_search_failure_preserves_earlier_results():
         fail_start_on=frozenset({2}),
     )
     service = SearchService(
-        gateway, FakeStore(), FakeClock(), search_timeout=5, min_results=3
+        gateway, FakeStore(), FakeClock(), search_timeout=5, enough_results=3
     )
 
     releases = service.search(SearchQuery(artist="Artist", album="Album"))
@@ -819,7 +819,7 @@ def test_idle_window_not_derived_from_budget():
         FakeClock(),
         search_timeout=0,
         search_budget=75,
-        min_results=99,
+        enough_results=99,
     )
 
     service.search(SearchQuery(artist="Artist", album="Album"))
@@ -848,7 +848,7 @@ def test_poll_cap_is_budget_not_the_idle_window():
         search_timeout=5,
         search_budget=75,
         poll_interval=1.0,
-        min_results=99,
+        enough_results=99,
     )
 
     releases = service.search(SearchQuery(artist="Artist", album="Album"))
@@ -868,7 +868,7 @@ def test_forwards_configured_idle_window_unchanged():
         FakeClock(),
         search_timeout=15,
         search_budget=300,
-        min_results=99,
+        enough_results=99,
     )
 
     service.search(SearchQuery(artist="Artist", album="Album"))
@@ -887,7 +887,7 @@ def test_same_idle_window_forwarded_to_every_candidate():
         FakeClock(),
         search_timeout=20,
         search_budget=75,
-        min_results=99,
+        enough_results=99,
     )
 
     service.search(SearchQuery(artist="Beyonce", album="Lemonade (Deluxe)"))
@@ -910,7 +910,7 @@ def test_fallbacks_stop_once_budget_is_exhausted():
         search_timeout=15,
         search_budget=75,
         poll_interval=1.0,
-        min_results=99,
+        enough_results=99,
     )
 
     service.search(SearchQuery(artist="Beyonce", album="Lemonade (Deluxe)"))
@@ -933,7 +933,7 @@ def test_primary_deadline_floored_when_budget_tiny():
         search_timeout=15,
         search_budget=0,
         poll_interval=1.0,
-        min_results=99,
+        enough_results=99,
     )
 
     releases = service.search(SearchQuery(artist="Artist", album="Album"))

@@ -137,12 +137,11 @@ def _make_config(**overrides) -> Config:
         categories=[(3000, "Audio"), (3040, "Audio/Lossless")],
         bridge_port=8765,
         search_timeout=30,
-        db_path=":memory:",
         min_bitrate=None,
         stall_timeout=1800,
         max_retries=1,
         log_level="INFO",
-        min_results=3,
+        enough_results=3,
         search_budget=75,
         api_key=None,
     )

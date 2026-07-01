@@ -44,7 +44,7 @@ class SearchService:
         poll_interval: float = 1.0,
         min_bitrate: int | None = None,
         release_ttl_days: int = 7,
-        min_results: int = 3,
+        enough_results: int = 3,
         search_budget: int = 75,
     ) -> None:
         self._gateway = gateway
@@ -54,7 +54,7 @@ class SearchService:
         self._poll_interval = poll_interval
         self._min_bitrate = min_bitrate
         self._release_ttl_days = release_ttl_days
-        self._min_results = min_results
+        self._enough_results = enough_results
         self._search_budget = search_budget
 
     def search(self, query: SearchQuery) -> list[Release]:
@@ -78,7 +78,7 @@ class SearchService:
                 # The primary always runs; a tight budget must not starve it.
                 deadline = max(remaining, _MIN_SEARCH_WINDOW)
             else:
-                if len(seen) >= self._min_results:
+                if len(seen) >= self._enough_results:
                     break
                 # Only start another candidate if enough budget remains to let a
                 # search complete; a shorter wait just hammers Soulseek.
