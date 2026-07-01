@@ -42,6 +42,7 @@ def build_app(env: Mapping[str, str]) -> Flask:
     gateway = SlskdGateway(
         config.slskd_url,
         config.slskd_api_key,
+        response_limit=config.response_limit,
     )
     clock = SystemClock()
     app = create_app(config, gateway, release_store, job_store, clock)

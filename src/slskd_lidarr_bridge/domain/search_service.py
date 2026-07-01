@@ -20,20 +20,17 @@ from slskd_lidarr_bridge.domain.titles import build_title
 
 logger = logging.getLogger(__name__)
 
-# Each candidate search takes the wall-clock time still available in the budget
-# (see ``search_budget``). These constants bound that window.
+# The bridge polls each candidate for ``isComplete`` up to the wall-clock time
+# still available in the budget (see ``search_budget``); slskd's own *idle*
+# ``searchTimeout`` (forwarded per call) plus ``responseLimit`` decide when a
+# search actually finishes. These two timers are independent: the budget is the
+# bridge's patience, not a value forwarded to slskd.
 
-# Reserved between one search finishing and the next candidate being submitted.
-# slskd serialises search submissions (an overlap gets an immediate HTTP 429) and
-# needs a beat to finish its current search and free the slot; this margin also
-# keeps the total comfortably under Lidarr's ~100 s request abort.
-_INTER_SEARCH_MARGIN = 5.0
-# A search shorter than this is not worth a round-trip and would fall below
-# slskd's minimum ``searchTimeout`` (5 s), so we stop rather than start one.
+# Floor for a single candidate's poll deadline. A shorter wait is not worth a
+# round-trip (it can barely reach slskd's 5 s minimum idle window), so we do not
+# start a candidate with less budget than this — except the primary, which always
+# runs floored to it so a misconfigured tiny budget cannot starve it.
 _MIN_SEARCH_WINDOW = 5.0
-# Poll a little past the window we forwarded to slskd: it flips ``isComplete``
-# just after its search window ends, and we want the finished result set.
-_COMPLETION_GRACE = 3.0
 
 
 class SearchService:
@@ -43,7 +40,7 @@ class SearchService:
         store: ReleaseStore,
         clock: Clock,
         *,
-        search_timeout: int = 0,
+        search_timeout: int = 15,
         poll_interval: float = 1.0,
         min_bitrate: int | None = None,
         release_ttl_days: int = 7,
@@ -76,20 +73,21 @@ class SearchService:
 
         for index, text in enumerate(candidates):
             elapsed = (self._clock.now() - start).total_seconds()
-            window = self._search_window(self._search_budget - elapsed)
+            remaining = self._search_budget - elapsed
             if index == 0:
                 # The primary always runs; a tight budget must not starve it.
-                window = max(window, _MIN_SEARCH_WINDOW)
+                deadline = max(remaining, _MIN_SEARCH_WINDOW)
             else:
                 if len(seen) >= self._min_results:
                     break
-                # Only start another candidate if enough budget remains for a
-                # worthwhile search; a shorter one just hammers Soulseek.
-                if window < _MIN_SEARCH_WINDOW:
+                # Only start another candidate if enough budget remains to let a
+                # search complete; a shorter wait just hammers Soulseek.
+                if remaining < _MIN_SEARCH_WINDOW:
                     break
+                deadline = remaining
 
             try:
-                responses = self._run_search(text, window)
+                responses = self._run_search(text, deadline)
             except Exception:
                 if not tagged:
                     # Nothing collected yet: a failing search is a genuine error
@@ -111,36 +109,27 @@ class SearchService:
         tagged.sort(key=lambda x: (x[0], x[1], -x[2]), reverse=True)
         return [r for *_, r in tagged]
 
-    def _search_window(self, remaining: float) -> float:
-        """Seconds a single search may run: the remaining wall-clock budget minus
-        the inter-search margin, optionally capped by the per-query maximum.
-
-        With ``search_timeout == 0`` (default) a search takes the whole remaining
-        budget — slskd's native "one search per query" behaviour. A positive
-        ``search_timeout`` caps each search so several looser candidates fit inside
-        the budget instead.
-        """
-        window = remaining - _INTER_SEARCH_MARGIN
-        if self._search_timeout > 0:
-            window = min(window, float(self._search_timeout))
-        return window
-
-    def _run_search(self, text: str, window: float) -> list[SearchResponse]:
-        # Forward the window to slskd as its own searchTimeout so it stops
-        # gathering when we stop polling — no lingering search to 429 the next
-        # candidate. Poll a little past it to catch isComplete.
-        sid = self._gateway.start_search(text, window)
-        poll_cap = window + _COMPLETION_GRACE
+    def _run_search(self, text: str, deadline: float) -> list[SearchResponse]:
+        # Forward a small, bounded idle window (``search_timeout``) to slskd, NOT
+        # the budget: ``searchTimeout`` is an inactivity timer that resets on each
+        # response, so a large value never completes on a busy query. slskd's
+        # ``responseLimit`` (gateway) plus this idle window decide completion; we
+        # poll for it up to the caller's wall-clock ``deadline``.
+        sid = self._gateway.start_search(text, float(self._search_timeout))
         start = self._clock.now()
         while not self._gateway.search_is_complete(sid):
             elapsed = (self._clock.now() - start).total_seconds()
-            if elapsed >= poll_cap:
+            if elapsed >= deadline:
+                # slskd exposes /responses only once a search is complete, so an
+                # abandoned search has nothing to read — return empty rather than
+                # fetch a guaranteed-empty snapshot. Non-fatal: the loop moves on.
                 logger.warning(
-                    "Search %r timed out after %ss; returning partial results",
+                    "Search %r did not complete within its %.0fs budget; "
+                    "no results (slskd populates /responses only once complete)",
                     text,
-                    poll_cap,
+                    deadline,
                 )
-                break
+                return []
             self._clock.sleep(self._poll_interval)
         return self._gateway.search_responses(sid)
 
