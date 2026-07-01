@@ -290,6 +290,51 @@ class TestTermSearch:
 
 
 # ---------------------------------------------------------------------------
+# Tests: pagination follow-up pages
+# ---------------------------------------------------------------------------
+
+
+class TestPagination:
+    """Lidarr paginates Newznab results in fixed pages of 100 (offset=0,100,…).
+
+    The bridge is a single-page indexer: it runs one live slskd search per query
+    and cannot page through a Soulseek swarm. A follow-up page (offset > 0) must
+    return an empty feed *without* re-running the search, so Lidarr stops after
+    the first page instead of re-triggering an identical Soulseek search per page.
+    """
+
+    def test_music_search_followup_page_returns_empty_without_search(self):
+        svc = FakeSearchService(results=[_make_release()])
+        client = _make_app(search_service=svc).test_client()
+        resp = client.get("/indexer/api?t=music&artist=A&album=B&offset=100&limit=100")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.findall(".//item") == []
+        assert svc.called_with == []
+
+    def test_term_search_followup_page_returns_empty_without_search(self):
+        svc = FakeSearchService(results=[_make_release()])
+        client = _make_app(search_service=svc).test_client()
+        resp = client.get("/indexer/api?t=search&q=pink+floyd&offset=100&limit=100")
+        assert resp.status_code == 200
+        root = ET.fromstring(resp.data)
+        assert root.findall(".//item") == []
+        assert svc.called_with == []
+
+    def test_first_page_offset_zero_still_searches(self):
+        release = _make_release()
+        svc = FakeSearchService(results=[release])
+        store = FakeReleaseStore()
+        store._releases["test-id-001"] = release
+        client = _make_app(search_service=svc, release_store=store).test_client()
+        resp = client.get("/indexer/api?t=music&artist=A&album=B&offset=0&limit=100")
+        assert resp.status_code == 200
+        assert len(svc.called_with) == 1
+        root = ET.fromstring(resp.data)
+        assert len(root.findall(".//item")) == 1
+
+
+# ---------------------------------------------------------------------------
 # Tests: unknown function
 # ---------------------------------------------------------------------------
 
