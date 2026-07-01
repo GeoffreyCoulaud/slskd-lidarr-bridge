@@ -15,12 +15,12 @@ Internal
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
 from datetime import UTC, datetime
 from types import TracebackType
-from uuid import uuid4
 
 from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
 
@@ -136,12 +136,27 @@ class SqliteStore:
     # ------------------------------------------------------------------
 
     def put(self, release: Release) -> str:
-        """Persist a Release; returns the newly assigned 16-char hex id."""
-        new_id = uuid4().hex[:16]
+        """Persist a Release, returning its deterministic id (SHA-256 hex).
+
+        The id is ``sha256(username + NUL + album_folder)`` — the pair that
+        identifies one offer on Soulseek. Deterministic so that re-seeing the
+        same folder (a later search, or another album's results) reuses the same
+        id instead of minting a fresh random one every time; the old ``uuid4``
+        handed Lidarr a new ``<guid>`` for an identical release on every request
+        and bloated this table with duplicate rows. Hashing (not embedding the
+        raw pair) keeps the uploader's Soulseek username and folder path out of
+        the public ``<guid>`` and the ``/indexer/nzb/<id>`` URL. The digest is
+        lowercase hex, so it is valid as an XML guid, a URL path segment, a
+        download filename, and a SQLite key. ``INSERT OR REPLACE`` refreshes an
+        existing row so ``created_at`` tracks the latest sighting for TTL purging.
+        """
+        new_id = hashlib.sha256(
+            f"{release.username}\x00{release.album_folder}".encode()
+        ).hexdigest()
         with self._write_lock:
             self._conn.execute(
                 """
-                INSERT INTO releases
+                INSERT OR REPLACE INTO releases
                     (id, artist, album, title, username, files, size,
                      album_folder, quality, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
