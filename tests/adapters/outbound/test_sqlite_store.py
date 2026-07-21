@@ -219,6 +219,65 @@ def test_release_naive_created_at_is_read_back_as_utc(stores, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_release_roundtrip_preserves_multiple_discs_in_order(stores, tmp_path):
+    """`_discs_to_json` / `_json_to_discs` must round-trip more than one disc.
+
+    Every other release fixture in this module uses a single disc with an
+    empty subpath, which never exercises (de)serialisation of a non-empty
+    subpath or of more than one disc entry — exactly the shape a real
+    multi-disc album produces.
+    """
+    rs, _ = stores(str(tmp_path / "db.sqlite"))
+    cd1_file1 = AudioFile(
+        filename=r"@@peer\Music\Artist\Album\CD1\01.flac",
+        size=30_000_000,
+        extension=".flac",
+        bitrate=1000,
+        length=240,
+    )
+    cd1_file2 = AudioFile(
+        filename=r"@@peer\Music\Artist\Album\CD1\02.flac",
+        size=20_000_000,
+        extension=".flac",
+        bitrate=1000,
+        length=200,
+    )
+    cd2_file1 = AudioFile(
+        filename=r"@@peer\Music\Artist\Album\CD2\01.flac",
+        size=25_000_000,
+        extension=".mp3",
+        bitrate=320,
+        length=180,
+    )
+    rel = dataclasses.replace(
+        make_release(album_path="@@a/Artist/Album"),
+        discs=(
+            Disc(subpath="CD1", files=(cd1_file1, cd1_file2)),
+            Disc(subpath="CD2", files=(cd2_file1,)),
+        ),
+    )
+    rid = rs.put(rel)
+
+    fetched = rs.get(rid)
+    assert fetched is not None
+    assert [d.subpath for d in fetched.discs] == ["CD1", "CD2"]
+    assert [f.filename for f in fetched.discs[0].files] == [
+        cd1_file1.filename,
+        cd1_file2.filename,
+    ]
+    assert [f.filename for f in fetched.discs[1].files] == [cd2_file1.filename]
+
+    # Every field of every file across both discs must survive intact, in order.
+    for original, roundtripped in zip(
+        (cd1_file1, cd1_file2, cd2_file1), fetched.files, strict=True
+    ):
+        assert roundtripped.filename == original.filename
+        assert roundtripped.size == original.size
+        assert roundtripped.extension == original.extension
+        assert roundtripped.bitrate == original.bitrate
+        assert roundtripped.length == original.length
+
+
 def test_release_id_is_sha256_of_username_and_folder(stores, tmp_path):
     rs, _ = stores(str(tmp_path / "db.sqlite"))
     rel = make_release(username="alice", album_path="@@a/Cool Album (Deluxe)")

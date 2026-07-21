@@ -33,23 +33,27 @@ from slskd_lidarr_bridge.domain.paths import (
 # ---------------------------------------------------------------------------
 
 _ALICE = "alice"
+# Two disc subfolders under one album root, so the flow exercises the whole
+# multi-disc path (search-side grouping, NZB subpaths, one enqueue batch per
+# disc, and a storage path reported to Lidarr with no disc component) rather
+# than only ever hitting the single-disc, empty-subpath case.
 _FILES = [
     AudioFile(
-        filename=r"@@alice\Music\Radiohead\In Rainbows\01 - 15 Step.flac",
+        filename=r"@@alice\Music\Radiohead\In Rainbows\CD1\01 - 15 Step.flac",
         size=30_000_000,
         extension=".flac",
         bitrate=None,
         length=237,
     ),
     AudioFile(
-        filename=r"@@alice\Music\Radiohead\In Rainbows\02 - Bodysnatchers.flac",
+        filename=r"@@alice\Music\Radiohead\In Rainbows\CD1\02 - Bodysnatchers.flac",
         size=25_000_000,
         extension=".flac",
         bitrate=None,
         length=242,
     ),
     AudioFile(
-        filename=r"@@alice\Music\Radiohead\In Rainbows\03 - Nude.flac",
+        filename=r"@@alice\Music\Radiohead\In Rainbows\CD2\01 - Nude.flac",
         size=28_000_000,
         extension=".flac",
         bitrate=None,
@@ -235,6 +239,12 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     payload = parse_nzb(nzb_bytes)
     assert payload["username"] == _ALICE
     assert sum(len(d["files"]) for d in payload["discs"]) == len(_FILES)
+    # The two-disc album must carry its per-disc subpaths through the NZB
+    # payload, in order, not just the flattened file count.
+    assert [d["subpath"] for d in payload["discs"]] == ["CD1", "CD2"], (
+        f"expected the album's two discs to survive in the NZB payload, "
+        f"got discs={payload['discs']!r}"
+    )
 
     # ------------------------------------------------------------------
     # Step 4: POST addfile multipart → capture nzo_id
@@ -300,18 +310,34 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
         f"storage {completed_slot['storage']!r} != expected {expected_storage!r}"
     )
 
-    # The destination the bridge told slskd to enqueue into must be the exact
-    # folder later reported to Lidarr as the storage path — that equality is
-    # the whole point of pinning a batch destination.
+    # The album has two discs, so the bridge must have enqueued one slskd batch
+    # per disc, each pinned under the shared album destination.
     assert gateway._enqueued, "expected the fake gateway to have recorded an enqueue"
-    sent_destination = gateway._enqueued[0][2]
-    assert (
-        compute_storage_path(downloads_dir, sent_destination)
-        == completed_slot["storage"]
-    ), (
-        f"destination sent to slskd {sent_destination!r} does not correspond to "
-        f"storage {completed_slot['storage']!r} reported to Lidarr"
+    assert len(gateway._enqueued) == 2, (
+        f"expected one enqueued batch per disc, got {gateway._enqueued!r}"
     )
+    sent_destinations = [destination for (_, _, destination) in gateway._enqueued]
+    assert sent_destinations == [
+        f"{expected_destination}/CD1",
+        f"{expected_destination}/CD2",
+    ], (
+        f"expected one batch destination per disc under the shared album folder "
+        f"{expected_destination!r}, got {sent_destinations!r}"
+    )
+
+    # Stripping each batch's own disc subfolder back off must land exactly on
+    # the folder later reported to Lidarr as the storage path — that
+    # containment is the whole point of pinning a per-disc batch destination
+    # under one shared album folder instead of a per-disc one.
+    for sent_destination in sent_destinations:
+        album_root_of_batch = sent_destination.rsplit("/", 1)[0]
+        assert (
+            compute_storage_path(downloads_dir, album_root_of_batch)
+            == completed_slot["storage"]
+        ), (
+            f"destination sent to slskd {sent_destination!r} is not rooted "
+            f"under storage {completed_slot['storage']!r} reported to Lidarr"
+        )
 
     resp = client.get("/sabnzbd/api?mode=queue")
     assert resp.status_code == 200
