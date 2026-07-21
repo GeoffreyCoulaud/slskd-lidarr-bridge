@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Mapping
 
 from flask import Flask
@@ -22,6 +23,48 @@ from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.logging_setup import configure_logging
 
 logger = logging.getLogger(__name__)
+
+# Batch download destinations, which the bridge relies on to place every disc of
+# an album under one folder, landed in slskd 0.26.0.
+MINIMUM_SLSKD_VERSION = (0, 26, 0)
+_MINIMUM_TEXT = ".".join(str(part) for part in MINIMUM_SLSKD_VERSION)
+
+
+def _check_slskd_version(gateway: SlskdGateway) -> None:
+    """Refuse to start against a slskd too old for batch download destinations.
+
+    Two cases deliberately warn instead of failing: an unreadable version (slskd
+    not up yet is transient, and crash-looping the container helps nobody), and
+    a version that does not parse, which is what development builds report
+    (``0.0.0``).
+    """
+    try:
+        reported = gateway.version()
+    except Exception:
+        logger.warning(
+            "Could not read slskd's version; continuing. This bridge needs "
+            "slskd %s or newer.",
+            _MINIMUM_TEXT,
+            exc_info=True,
+        )
+        return
+
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", reported)
+    if match is None or reported.startswith("0.0.0"):
+        logger.warning(
+            "slskd reports version %r, which is not a release version "
+            "(development build?). Assuming it is at least %s.",
+            reported,
+            _MINIMUM_TEXT,
+        )
+        return
+
+    if tuple(int(part) for part in match.groups()) < MINIMUM_SLSKD_VERSION:
+        raise RuntimeError(
+            f"slskd {reported} is too old: this bridge requires slskd "
+            f"{_MINIMUM_TEXT} or newer, which introduced per-batch download "
+            f"destinations (multi-disc album support)."
+        )
 
 
 def build_app(env: Mapping[str, str], *, db_path: str | None = None) -> Flask:
@@ -39,6 +82,7 @@ def build_app(env: Mapping[str, str], *, db_path: str | None = None) -> Flask:
 
     Raises:
         ValueError: if a required environment variable is missing.
+        RuntimeError: if slskd is reachable and older than the minimum version.
     """
     config = Config.from_env(env)
     release_store, job_store = open_stores(db_path)
@@ -47,6 +91,7 @@ def build_app(env: Mapping[str, str], *, db_path: str | None = None) -> Flask:
         config.slskd_api_key,
         response_limit=config.response_limit,
     )
+    _check_slskd_version(gateway)
     clock = SystemClock()
     app = create_app(config, gateway, release_store, job_store, clock)
     app.config["BRIDGE_CONFIG"] = config
