@@ -85,13 +85,17 @@ def build_app(env: Mapping[str, str], *, db_path: str | None = None) -> Flask:
         RuntimeError: if slskd is reachable and older than the minimum version.
     """
     config = Config.from_env(env)
-    release_store, job_store = open_stores(db_path)
     gateway = SlskdGateway(
         config.slskd_url,
         config.slskd_api_key,
         response_limit=config.response_limit,
     )
+    # Check the version *before* opening the stores: opening them recreates the
+    # tables when the schema predates this build, and wiping a user's database
+    # on the way to refusing to start would be gratuitous. It also keeps the
+    # fatal path from leaking a SQLite connection.
     _check_slskd_version(gateway)
+    release_store, job_store = open_stores(db_path)
     clock = SystemClock()
     app = create_app(config, gateway, release_store, job_store, clock)
     app.config["BRIDGE_CONFIG"] = config
