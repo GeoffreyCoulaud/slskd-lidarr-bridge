@@ -17,17 +17,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 import threading
 from datetime import UTC, datetime
 from types import TracebackType
 
-from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
+from slskd_lidarr_bridge.domain.models import AudioFile, Disc, DownloadJob, Release
+
+logger = logging.getLogger(__name__)
 
 # Fixed location of the SQLite file inside the container's ``/data`` volume.
 # Not user-configurable; tests override it by passing ``db_path`` to
 # ``open_stores`` (or by patching this constant).
 DEFAULT_DB_PATH = "/data/bridge.db"
+
+# Bumped whenever the table layout changes. The database holds a 7-day release
+# cache and in-flight jobs, both cheap to lose, so a mismatch recreates the
+# tables rather than migrating them.
+SCHEMA_VERSION = 2
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS releases (
@@ -36,9 +44,10 @@ CREATE TABLE IF NOT EXISTS releases (
     album       TEXT NOT NULL,
     title       TEXT NOT NULL,
     username    TEXT NOT NULL,
-    files       TEXT NOT NULL,   -- JSON
+    discs       TEXT NOT NULL,   -- JSON
     size        INTEGER NOT NULL,
-    album_folder TEXT NOT NULL,
+    album_path  TEXT NOT NULL,
+    destination TEXT NOT NULL,
     quality     TEXT NOT NULL,
     created_at  TEXT NOT NULL    -- ISO-8601
 );
@@ -84,6 +93,22 @@ def _json_to_files(raw: str) -> tuple[AudioFile, ...]:
     )
 
 
+def _discs_to_json(discs: tuple[Disc, ...]) -> str:
+    return json.dumps(
+        [
+            {"subpath": d.subpath, "files": json.loads(_files_to_json(d.files))}
+            for d in discs
+        ]
+    )
+
+
+def _json_to_discs(raw: str) -> tuple[Disc, ...]:
+    return tuple(
+        Disc(subpath=d["subpath"], files=_json_to_files(json.dumps(d["files"])))
+        for d in json.loads(raw)
+    )
+
+
 def _parse_dt(s: str) -> datetime:
     """Parse an ISO-8601 string (UTC) into an aware datetime."""
     dt = datetime.fromisoformat(s)
@@ -109,8 +134,36 @@ class SqliteStore:
         self._conn.row_factory = sqlite3.Row
         self._write_lock = threading.Lock()
         with self._write_lock:
+            self._migrate()
             self._conn.executescript(_DDL)
+            self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Drop the tables when they predate this build's schema.
+
+        There is nothing worth migrating: releases are a 7-day cache. Jobs in
+        flight are lost, which Lidarr recovers from by re-grabbing, so it is
+        worth a warning but not a migration path.
+        """
+        version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == SCHEMA_VERSION:
+            return
+        existing = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name IN ('releases', 'jobs')"
+        ).fetchall()
+        if existing:
+            logger.warning(
+                "Database schema is v%s but this build needs v%s: dropping the "
+                "cached releases and any in-flight downloads. Lidarr will "
+                "re-grab anything that was still downloading.",
+                version,
+                SCHEMA_VERSION,
+            )
+        self._conn.executescript(
+            "DROP TABLE IF EXISTS releases; DROP TABLE IF EXISTS jobs;"
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -143,10 +196,12 @@ class SqliteStore:
     def put(self, release: Release) -> str:
         """Persist a Release, returning its deterministic id (SHA-256 hex).
 
-        The id is ``sha256(username + NUL + album_folder)`` — the pair that
-        identifies one offer on Soulseek. Deterministic so that re-seeing the
-        same folder (a later search, or another album's results) reuses the same
-        id instead of minting a fresh random one every time; the old ``uuid4``
+        The id is ``sha256(username + NUL + album_path)`` — the pair that
+        identifies one offer on Soulseek. Hashing the full remote path (not just
+        the album folder's name) keeps two albums of one peer whose folders
+        happen to share a name apart. Deterministic so that re-seeing the same
+        album (a later search, or another album's results) reuses the same id
+        instead of minting a fresh random one every time; the old ``uuid4``
         handed Lidarr a new ``<guid>`` for an identical release on every request
         and bloated this table with duplicate rows. Hashing (not embedding the
         raw pair) keeps the uploader's Soulseek username and folder path out of
@@ -156,15 +211,15 @@ class SqliteStore:
         existing row so ``created_at`` tracks the latest sighting for TTL purging.
         """
         new_id = hashlib.sha256(
-            f"{release.username}\x00{release.album_folder}".encode()
+            f"{release.username}\x00{release.album_path}".encode()
         ).hexdigest()
         with self._write_lock:
             self._conn.execute(
                 """
                 INSERT OR REPLACE INTO releases
-                    (id, artist, album, title, username, files, size,
-                     album_folder, quality, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, artist, album, title, username, discs, size,
+                     album_path, destination, quality, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     new_id,
@@ -172,9 +227,10 @@ class SqliteStore:
                     release.album,
                     release.title,
                     release.username,
-                    _files_to_json(release.files),
+                    _discs_to_json(release.discs),
                     release.size,
-                    release.album_folder,
+                    release.album_path,
+                    release.destination,
                     release.quality,
                     release.created_at.isoformat(),
                 ),
@@ -195,9 +251,10 @@ class SqliteStore:
             album=row["album"],
             title=row["title"],
             username=row["username"],
-            files=_json_to_files(row["files"]),
+            discs=_json_to_discs(row["discs"]),
             size=row["size"],
-            album_folder=row["album_folder"],
+            album_path=row["album_path"],
+            destination=row["destination"],
             quality=row["quality"],
             created_at=_parse_dt(row["created_at"]),
         )

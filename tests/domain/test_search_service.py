@@ -341,7 +341,7 @@ def test_two_folders_produce_two_releases():
     releases = service.search(SearchQuery(artist="Bob", album="Test"))
 
     assert len(releases) == 2
-    folders = {r.album_folder for r in releases}
+    folders = {r.album for r in releases}
     assert folders == {"Album A", "Album B"}
 
 
@@ -737,7 +737,7 @@ def test_dedup_same_user_folder_across_candidates_counts_once():
     gateway = FakeGateway(completes_on=1, responses=[resp])
     service = SearchService(gateway, FakeStore(), FakeClock(), enough_results=99)
     releases = service.search(SearchQuery(artist="A", album="B"))
-    assert len(releases) == 1  # deduped on (username, album_folder)
+    assert len(releases) == 1  # deduped on (username, album_path)
     assert len(gateway.started_searches) >= 2  # walked candidates (never reached 99)
 
 
@@ -791,7 +791,7 @@ def test_candidate_search_failure_preserves_earlier_results():
 
     releases = service.search(SearchQuery(artist="Artist", album="Album"))
 
-    assert [r.album_folder for r in releases] == ["OnlyOne"]  # primary survives
+    assert [r.album for r in releases] == ["OnlyOne"]  # primary survives
     assert gateway.started_searches == ["Artist Album"]  # fallback #2 was refused
 
 
@@ -927,6 +927,55 @@ def test_fallbacks_stop_once_budget_is_exhausted():
 
     # Primary + one fallback started; the album-only candidate is skipped.
     assert gateway.started_searches == ["Beyonce Lemonade (Deluxe)", "Beyonce Lemonade"]
+
+
+def test_multi_disc_album_becomes_one_release():
+    files = (
+        AudioFile(filename=r"@@a\Artist\Album\CD1\01.flac", size=10, extension=".flac"),
+        AudioFile(filename=r"@@a\Artist\Album\CD2\01.flac", size=20, extension=".flac"),
+    )
+    gateway = FakeGateway(responses=[SearchResponse("bob", True, 100, 0, files)])
+    service = SearchService(gateway, FakeStore(), FakeClock())
+
+    releases = service.search(SearchQuery(artist="Artist", album="Album"))
+
+    assert len(releases) == 1
+    release = releases[0]
+    assert release.album == "Album"
+    assert release.artist == "Artist"
+    assert release.size == 30
+    assert release.album_path == "@@a/Artist/Album"
+    assert release.destination == "Album [bob]"
+    assert [d.subpath for d in release.discs] == ["CD1", "CD2"]
+
+
+def test_single_disc_release_keeps_one_unnamed_disc():
+    files = (
+        AudioFile(filename=r"@@a\Artist\Album\01.flac", size=10, extension=".flac"),
+    )
+    gateway = FakeGateway(responses=[SearchResponse("bob", True, 100, 0, files)])
+    service = SearchService(gateway, FakeStore(), FakeClock())
+
+    releases = service.search(SearchQuery(artist="Artist", album="Album"))
+
+    assert [d.subpath for d in releases[0].discs] == [""]
+    assert releases[0].destination == "Album [bob]"
+
+
+def test_artist_and_album_split_on_the_album_folder_name():
+    files = (
+        AudioFile(
+            filename=r"@@a\Music\Pink Floyd - Animals\01.flac",
+            size=10,
+            extension=".flac",
+        ),
+    )
+    gateway = FakeGateway(responses=[SearchResponse("bob", True, 100, 0, files)])
+    service = SearchService(gateway, FakeStore(), FakeClock())
+
+    release = service.search(SearchQuery(term="animals"))[0]
+
+    assert (release.artist, release.album) == ("Pink Floyd", "Animals")
 
 
 def test_primary_deadline_floored_when_budget_tiny():

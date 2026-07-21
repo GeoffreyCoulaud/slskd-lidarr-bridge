@@ -126,12 +126,18 @@ class Release:
     album: str
     title: str
     username: str
-    files: tuple[AudioFile, ...]
+    discs: tuple[Disc, ...]
     size: int
-    album_folder: str
+    album_path: str  # full remote directory of the album root, "/"-separated
+    destination: str  # local folder, relative to slskd's downloads directory
     quality: str  # "FLAC", "MP3-320", ...
     created_at: datetime
     id: str | None = None  # set by ReleaseStore.put
+
+    @property
+    def files(self) -> tuple[AudioFile, ...]:
+        """Every file of the release, discs flattened in order."""
+        return tuple(f for disc in self.discs for f in disc.files)
 
 
 @dataclass(frozen=True)

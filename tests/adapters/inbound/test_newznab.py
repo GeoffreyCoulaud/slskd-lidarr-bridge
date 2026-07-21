@@ -11,7 +11,7 @@ import flask
 
 from slskd_lidarr_bridge.adapters.inbound.newznab import create_newznab_blueprint
 from slskd_lidarr_bridge.adapters.inbound.nzb import parse_nzb
-from slskd_lidarr_bridge.domain.models import AudioFile, Release, SearchQuery
+from slskd_lidarr_bridge.domain.models import AudioFile, Disc, Release, SearchQuery
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -55,15 +55,21 @@ def _make_release(release_id: str = "test-id-001", quality: str = "FLAC") -> Rel
         album="Album",
         title="Artist - Album [FLAC]",
         username="user1",
-        files=(
-            AudioFile(
-                filename=r"user1\Music\Artist\Album\01.flac",
-                size=5_000_000,
-                extension=".flac",
+        discs=(
+            Disc(
+                subpath="",
+                files=(
+                    AudioFile(
+                        filename=r"user1\Music\Artist\Album\01.flac",
+                        size=5_000_000,
+                        extension=".flac",
+                    ),
+                ),
             ),
         ),
         size=5_000_000,
-        album_folder="Album",
+        album_path="@@a/Music/Artist/Album",
+        destination="Album [user1]",
         quality=quality,
         created_at=CREATED_AT,
     )
@@ -381,9 +387,12 @@ class TestNzbRoute:
         payload = parse_nzb(resp.data)
         assert payload["username"] == release.username
         assert payload["title"] == release.title
-        assert payload["album_folder"] == release.album_folder
+        assert payload["album_folder"] == release.destination  # legacy key
         assert payload["total_size"] == release.size
         assert len(payload["files"]) == len(release.files)
+        assert payload["destination"] == release.destination
+        assert len(payload["discs"]) == len(release.discs)
+        assert payload["discs"][0]["subpath"] == release.discs[0].subpath
 
     def test_unknown_release_returns_404(self):
         client = _make_app().test_client()
