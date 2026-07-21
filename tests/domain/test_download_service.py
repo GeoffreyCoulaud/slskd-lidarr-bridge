@@ -83,6 +83,7 @@ class FakeGateway:
         self.cancelled.append((username, transfer_id))
 
     def downloads_directory(self) -> str:
+        self._assert_not_locked()
         return "/downloads"
 
 
@@ -320,8 +321,28 @@ def test_start_cancels_what_it_queued_when_a_later_disc_fails():
     assert gateway.cancelled == [("bob", "t1")]
 
 
-def test_start_does_not_cancel_when_the_very_first_disc_fails():
-    gateway = FakeGateway()
+def test_start_cancels_the_partially_enqueued_disc_that_failed():
+    # slskd's batch endpoint answers 207 when it enqueued only some of a
+    # batch's files, and raises EnqueueError for that response like any other
+    # enqueue failure. So even when the very first (here, only) disc fails,
+    # some of its files may already be live transfers on slskd; those must
+    # still be cancelled or they orphan silently.
+    gateway = FakeGateway(
+        transfers_by_username={
+            "bob": [
+                Transfer(
+                    username="bob",
+                    id="t1",
+                    filename="a.flac",
+                    size=5,
+                    state="InProgress",
+                    bytes_transferred=1,
+                    bytes_remaining=4,
+                    percent_complete=20.0,
+                )
+            ]
+        }
+    )
     gateway.fail_enqueue_after = 0
     service = DownloadService(gateway, FakeJobStore(), FakeClock())
 
@@ -333,7 +354,7 @@ def test_start_does_not_cancel_when_the_very_first_disc_fails():
             "music",
         )
 
-    assert gateway.cancelled == []
+    assert gateway.cancelled == [("bob", "t1")]
 
 
 def test_completed_job_reports_the_destination_as_its_storage_path():

@@ -13,10 +13,17 @@ def compute_storage_path(downloads_dir: str, destination: str) -> str:
     than an inference about slskd's layout: slskd gives a batch destination
     precedence over its own ``transfers.download.destination`` pattern, and the
     segments were sanitized to survive slskd's own sanitization unchanged.
+
+    ``build_album_destination`` always strips slashes, but ``start()`` reads
+    ``destination`` straight from the NZB payload, one hop removed from that
+    guarantee. A leading slash would make ``posixpath.join`` treat it as
+    absolute and silently drop ``downloads_dir``, so it is stripped here too.
     """
     # Strip any trailing slash; guard against "/" → "" which would produce a
     # relative path.  If stripping empties the string, treat base as "/".
     base = downloads_dir.rstrip("/") or "/"
+    if destination.startswith("/"):
+        destination = destination.lstrip("/")
     return posixpath.join(base, destination)
 
 

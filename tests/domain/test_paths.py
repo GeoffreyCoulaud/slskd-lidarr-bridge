@@ -20,6 +20,14 @@ def test_compute_storage_path_tolerates_a_root_downloads_dir():
     assert compute_storage_path("/", "Album") == "/Album"
 
 
+def test_compute_storage_path_strips_a_leading_slash_from_destination():
+    # posixpath.join treats a leading "/" as absolute and silently drops
+    # downloads_dir; destination is read straight from the NZB payload in
+    # start(), one hop removed from build_album_destination's guarantee that
+    # it never has one, so this must be defended against locally too.
+    assert compute_storage_path("/downloads", "/Album") == "/downloads/Album"
+
+
 def test_sanitize_segment_replaces_separators_and_hostile_characters():
     assert sanitize_segment("AC/DC") == "AC_DC"
     assert sanitize_segment("Album: The Return") == "Album_ The Return"
