@@ -99,9 +99,10 @@ def test_build_app_accepts_an_unrecognisable_version_with_a_warning(
     )
 
     with caplog.at_level(logging.WARNING):
-        main_module.build_app(env, db_path=str(tmp_path / "b.db"))
+        app = main_module.build_app(env, db_path=str(tmp_path / "b.db"))
 
     assert "version" in caplog.text.lower()
+    app.config["BRIDGE_STORE"].close()
 
 
 def test_build_app_continues_when_slskd_is_unreachable(
@@ -119,9 +120,10 @@ def test_build_app_continues_when_slskd_is_unreachable(
     )
 
     with caplog.at_level(logging.WARNING):
-        main_module.build_app(env, db_path=str(tmp_path / "b.db"))
+        app = main_module.build_app(env, db_path=str(tmp_path / "b.db"))
 
     assert "could not read" in caplog.text.lower()
+    app.config["BRIDGE_STORE"].close()
 
 
 def test_build_app_accepts_a_supported_version(monkeypatch, tmp_path, caplog) -> None:
@@ -134,9 +136,10 @@ def test_build_app_accepts_a_supported_version(monkeypatch, tmp_path, caplog) ->
     )
 
     with caplog.at_level(logging.WARNING):
-        main_module.build_app(env, db_path=str(tmp_path / "b.db"))
+        app = main_module.build_app(env, db_path=str(tmp_path / "b.db"))
 
     assert caplog.text == ""
+    app.config["BRIDGE_STORE"].close()
 
 
 class TestMain:
