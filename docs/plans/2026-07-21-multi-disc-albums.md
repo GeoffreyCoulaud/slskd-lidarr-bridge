@@ -1544,6 +1544,14 @@ class DownloadJob:
 and delete `local_path` from `Transfer` (both the field and the comment): slskd
 exposes no on-disk path there, and the bridge now chooses the path itself.
 
+Also delete the `AudioFile.album_folder` and `AudioFile.artist_folder`
+properties, along with their tests in `tests/domain/test_models.py`. Task 4
+removed their last production callers when `SearchService._collect` moved to
+`group_files_by_album`, which derives both from the album root instead. Verified
+before amending this plan: `grep -rn "artist_folder\|\.album_folder" src/`
+returns no reader of either property outside their own definitions. Leaving them
+would be dead surface area that the next reader would take for live API.
+
 - [ ] **Step 4: Simplify `compute_storage_path`**
 
 In `src/slskd_lidarr_bridge/domain/paths.py`, replace the whole function
