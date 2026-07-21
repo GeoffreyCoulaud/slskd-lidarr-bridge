@@ -856,7 +856,7 @@ git commit -m "feat(slskd): enqueue through the batch endpoint with a destinatio
 - Produces:
   - `Release(artist, album, title, username, discs, size, album_path,
     destination, quality, created_at, id=None)` with a `files` property
-  - `SCHEMA_VERSION = 2` in `adapters/outbound/sqlite_store.py`
+  - `SCHEMA_VERSION = 3` in `adapters/outbound/sqlite_store.py`
   - NZB payload gains `destination: str` and
     `discs: list[{"subpath": str, "files": [{"filename": str, "size": int}]}]`
 
@@ -1060,7 +1060,7 @@ In `src/slskd_lidarr_bridge/adapters/outbound/sqlite_store.py`, add
 # Bumped whenever the table layout changes. The database holds a 7-day release
 # cache and in-flight jobs, both cheap to lose, so a mismatch recreates the
 # tables rather than migrating them.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 ```
 
 Change the `releases` DDL to:
