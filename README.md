@@ -34,6 +34,13 @@ volumes:
   bridge-data:
 ```
 
+> [!IMPORTANT]
+> **slskd `0.26.0` or newer is required.** The bridge tells slskd where to place
+> each download (a per-batch destination), which is what lets it keep every disc
+> of an album under one folder. The bridge refuses to start against an older
+> slskd. Note that slskd `0.26.0` also carries a breaking configuration change of
+> its own: see its [release notes](https://github.com/slskd/slskd/releases/tag/0.26.0).
+
 > [!NOTE]
 > **slskd API key role:** create the key in slskd with the **`readwrite`** role — the bridge issues reads (search, status) and writes (enqueue/cancel downloads). As of slskd `0.25.x` the endpoints the bridge calls only require an authenticated key (the `Any` policy — no specific role is enforced yet), so any role technically works, but `readwrite` is the correct, future-proof choice for a client that writes.
 
@@ -81,7 +88,12 @@ Both **URL Base** (on the download client) and **Download Client** (on the index
 
 ### 3. Completed-downloads path
 
-The bridge reads slskd's completed-downloads directory (slskd's `directories.downloads`) from slskd's API and reports `<that dir>/<album folder>` to Lidarr as the import path — no path configuration on the bridge.
+The bridge chooses the folder each download lands in and reports it to Lidarr:
+`<slskd's downloads dir>/<album folder> [<peer>]`, with each disc of a
+multi-disc album in its own subfolder underneath. slskd's downloads directory is
+read from its API, so there is no path configuration on the bridge, and slskd's
+own `transfers.download.destination.subdirectory` pattern does not apply to
+bridge downloads (a destination sent with a batch takes precedence over it).
 
 Lidarr must be able to read that path. If slskd and Lidarr see the downloads on the **same** filesystem path (shared volume), it works as-is. If they differ (e.g. slskd writes to `/downloads` but Lidarr sees `/media/music/downloads`), add a **Remote Path Mapping** in Lidarr under **Settings → Download Clients → Remote Path Mappings**: set *Host* to the bridge's host and *Remote Path* to slskd's path, *Local Path* to Lidarr's path. This is the standard download-client mechanism — slskd's path is the source of truth, Lidarr translates it.
 
@@ -105,5 +117,9 @@ Lidarr must be able to read that path. If slskd and Lidarr see the downloads on 
 
 ## Limitations
 
-- **Multi-disc albums are not supported.** Through the latest slskd release (`0.25.1`, as of June 2026), slskd always writes a download to `<downloads>/<immediate parent folder>/` and exposes no way to change this. A multi-disc album laid out remotely as `…/Album/CD1/…` and `…/Album/CD2/…` therefore lands in **separate sibling folders** (`/downloads/CD1/`, `/downloads/CD2/`) with no shared album root on disk, and the bridge reports the per-disc folder, so Lidarr sees each disc as a separate, incomplete release. This **cannot be worked around in the bridge, nor with a Remote Path Mapping**, because no single folder contains every disc. Single-disc albums are unaffected. A real fix is blocked on an unreleased slskd capability; the prerequisite and the planned approach are documented in the `compute_storage_path` docstring (`src/slskd_lidarr_bridge/domain/paths.py`).
+- **Upgrading resets the bridge's database.** The schema changed with multi-disc
+  support; on first start the bridge drops its cached releases and any jobs it
+  was tracking. Downloads in flight at that moment are forgotten by the bridge
+  (slskd keeps downloading them) and Lidarr re-grabs them. Nothing else is
+  affected: the database holds no configuration.
 - **Lidarr must reach slskd's downloads path:** the bridge reports slskd's own completed-downloads path to Lidarr (discovered from slskd's API). Lidarr must see that path — via a shared volume at the same path, or a Remote Path Mapping when the mounts differ (see [Completed-downloads path](#3-completed-downloads-path)). Otherwise Lidarr fails to import completed downloads.
