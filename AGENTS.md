@@ -7,6 +7,11 @@ them, and leave the codebase as clean as you found it.
 For *what the project does* and *how to deploy it*, read [README.md](README.md)
 first. This file covers *how to work in the code*.
 
+**Read [docs/backlog.md](docs/backlog.md) at the start of a session.** It holds
+the work we know about and have deliberately not done: deferred review findings,
+accepted gaps, untested assumptions. Add to it whenever you decide *not* to fix
+something you noticed, and delete an entry in the pull request that resolves it.
+
 ## What this is
 
 A bridge that impersonates a **Newznab indexer** + **SABnzbd download client**
@@ -106,4 +111,4 @@ runs the same gate and will block otherwise.
 - **Integrate via pull request.** Open a PR against `main` rather than pushing to
   it directly.
 - Design notes and the original build plan are under `docs/specs/` and
-  `docs/plans/`.
+  `docs/plans/`; known-but-unfixed work is in [docs/backlog.md](docs/backlog.md).
