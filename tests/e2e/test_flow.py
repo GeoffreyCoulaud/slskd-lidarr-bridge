@@ -300,6 +300,19 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
         f"storage {completed_slot['storage']!r} != expected {expected_storage!r}"
     )
 
+    # The destination the bridge told slskd to enqueue into must be the exact
+    # folder later reported to Lidarr as the storage path — that equality is
+    # the whole point of pinning a batch destination.
+    assert gateway._enqueued, "expected the fake gateway to have recorded an enqueue"
+    sent_destination = gateway._enqueued[0][2]
+    assert (
+        compute_storage_path(downloads_dir, sent_destination)
+        == completed_slot["storage"]
+    ), (
+        f"destination sent to slskd {sent_destination!r} does not correspond to "
+        f"storage {completed_slot['storage']!r} reported to Lidarr"
+    )
+
     resp = client.get("/sabnzbd/api?mode=queue")
     assert resp.status_code == 200
     q_data = resp.get_json()

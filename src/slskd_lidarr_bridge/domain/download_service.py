@@ -83,24 +83,23 @@ class DownloadService:
             for d in payload["discs"]
         )
 
-        queued: list[Disc] = []
+        attempted: list[Disc] = []
         try:
             for disc in discs:
+                attempted.append(disc)
                 self._gateway.enqueue(
                     username,
                     list(disc.files),
                     batch_destination(destination, disc.subpath),
                 )
-                queued.append(disc)
         except Exception:
-            if queued:
-                logger.warning(
-                    "Enqueue of %r failed partway through; cancelling %d disc(s) "
-                    "already queued",
-                    title,
-                    len(queued),
-                )
-                self._cancel_files(username, [f for d in queued for f in d.files])
+            logger.warning(
+                "Enqueue of %r failed; cancelling any transfer already queued "
+                "for its %d attempted disc(s)",
+                title,
+                len(attempted),
+            )
+            self._cancel_files(username, [f for d in attempted for f in d.files])
             raise
 
         nzo_id = "SABnzbd_nzo_" + uuid4().hex[:12]
@@ -191,17 +190,23 @@ class DownloadService:
                         self._progress[job.nzo_id] = (transferred_bytes, now)
                 if do_retry:
                     failed_names = {t.filename for t in matched if t.is_failed}
-                    try:
-                        for disc in job.discs:
-                            retry_files = [
-                                f for f in disc.files if f.filename in failed_names
-                            ]
-                            if retry_files:
-                                self._gateway.enqueue(
-                                    job.username,
+                    retry_batches: list[tuple[list[AudioFile], str]] = []
+                    for disc in job.discs:
+                        retry_files = [
+                            f for f in disc.files if f.filename in failed_names
+                        ]
+                        if retry_files:
+                            retry_batches.append(
+                                (
                                     retry_files,
                                     batch_destination(job.destination, disc.subpath),
                                 )
+                            )
+                    try:
+                        for retry_files, retry_destination in retry_batches:
+                            self._gateway.enqueue(
+                                job.username, retry_files, retry_destination
+                            )
                     except Exception:
                         # Never let this escape: statuses() backs SABnzbd's queue
                         # endpoint, and an exception here makes Lidarr treat the
