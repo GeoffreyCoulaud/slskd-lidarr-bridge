@@ -1606,24 +1606,32 @@ In `src/slskd_lidarr_bridge/domain/download_service.py`, import
             for d in payload["discs"]
         )
 
-        queued: list[Disc] = []
+        # NOTE (corrected after Task 5's review): record each disc BEFORE
+        # attempting it, and always compensate. `enqueue` also raises on HTTP
+        # 207, where slskd accepted *some* of the batch's files, so the failing
+        # disc's accepted files are exactly the ones that would be orphaned.
+        # An earlier draft appended only after success and skipped compensation
+        # when nothing had succeeded yet, which left every single-disc 207 with
+        # no compensation at all. `_cancel_files` matches by filename against
+        # the transfers slskd reports, so passing files that were never
+        # enqueued is a harmless no-op.
+        attempted: list[Disc] = []
         try:
             for disc in discs:
+                attempted.append(disc)
                 self._gateway.enqueue(
                     username,
                     list(disc.files),
                     batch_destination(destination, disc.subpath),
                 )
-                queued.append(disc)
         except Exception:
-            if queued:
-                logger.warning(
-                    "Enqueue of %r failed partway through; cancelling %d disc(s) "
-                    "already queued",
-                    title,
-                    len(queued),
-                )
-                self._cancel_files(username, [f for d in queued for f in d.files])
+            logger.warning(
+                "Enqueue of %r failed; cancelling any transfer already queued "
+                "for its %d attempted disc(s)",
+                title,
+                len(attempted),
+            )
+            self._cancel_files(username, [f for d in attempted for f in d.files])
             raise
 
         nzo_id = "SABnzbd_nzo_" + uuid4().hex[:12]
