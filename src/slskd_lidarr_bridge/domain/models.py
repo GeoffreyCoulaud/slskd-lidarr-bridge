@@ -17,32 +17,6 @@ class AudioFile:
     length: int | None = None  # seconds if known
 
     @property
-    def album_folder(self) -> str:
-        """Last directory component of filename (split on back/forward slash)."""
-        # Normalize backslashes to forward slashes
-        normalized = self.filename.replace("\\", "/")
-        parts = normalized.split("/")
-        # parts[-1] is the filename, parts[-2] is the parent dir (if it exists)
-        if len(parts) >= 2:
-            return parts[-2]
-        return ""
-
-    @property
-    def artist_folder(self) -> str:
-        """Grandparent directory component — the folder above the album folder.
-
-        Empty string when the path is too flat to have a folder above the album
-        folder (e.g. ``Album/track.flac`` or a bare filename). By the common
-        ``Artist/Album/track`` layout this is the artist.
-        """
-        normalized = self.filename.replace("\\", "/")
-        parts = normalized.split("/")
-        # parts[-1] file, parts[-2] album folder, parts[-3] artist folder
-        if len(parts) >= 3:
-            return parts[-3]
-        return ""
-
-    @property
     def is_audio(self) -> bool:
         """True if extension is in AUDIO_EXTENSIONS (case-insensitive)."""
         if self.extension is None:
@@ -83,7 +57,6 @@ class Transfer:
     bytes_remaining: int
     percent_complete: float
     exception: str | None = None
-    local_path: str | None = None  # set if slskd exposes the on-disk path; else None
 
     @property
     def is_complete(self) -> bool:
@@ -145,11 +118,16 @@ class DownloadJob:
     nzo_id: str
     title: str
     username: str
-    files: tuple[AudioFile, ...]
+    discs: tuple[Disc, ...]
     category: str
-    album_folder: str
+    destination: str  # local folder, relative to slskd's downloads directory
     total_size: int
     created_at: datetime
+
+    @property
+    def files(self) -> tuple[AudioFile, ...]:
+        """Every file of the job, discs flattened in order."""
+        return tuple(f for disc in self.discs for f in disc.files)
 
 
 @dataclass(frozen=True)

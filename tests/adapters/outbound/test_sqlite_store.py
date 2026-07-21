@@ -69,9 +69,9 @@ def make_job() -> DownloadJob:
         nzo_id="nzo-abc",
         title="Test Artist - Test Album [FLAC]",
         username="peer1",
-        files=(FILE1,),
+        discs=(Disc(subpath="", files=(FILE1,)),),
         category="music",
-        album_folder="Album",
+        destination="Album",
         total_size=30_000_000,
         created_at=DT_NOW,
     )
@@ -272,7 +272,7 @@ def test_job_add_get_roundtrip(stores, tmp_path):
     assert fetched.title == job.title
     assert fetched.username == job.username
     assert fetched.category == job.category
-    assert fetched.album_folder == job.album_folder
+    assert fetched.destination == job.destination
     assert fetched.total_size == job.total_size
     assert fetched.created_at == job.created_at
     assert len(fetched.files) == 1
@@ -299,9 +299,9 @@ def test_job_list_returns_all(stores, tmp_path):
         nzo_id="nzo-def",
         title="Another",
         username="peer2",
-        files=(FILE2,),
+        discs=(Disc(subpath="", files=(FILE2,)),),
         category="music",
-        album_folder="Other",
+        destination="Other",
         total_size=25_000_000,
         created_at=DT_NOW,
     )

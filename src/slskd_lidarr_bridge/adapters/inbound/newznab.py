@@ -200,9 +200,6 @@ def create_newznab_blueprint(
         payload = {
             "username": release.username,
             "title": release.title,
-            # Legacy keys, still read by DownloadService until it is disc-aware.
-            "album_folder": release.destination,
-            "files": [{"filename": f.filename, "size": f.size} for f in release.files],
             "total_size": release.size,
             "destination": release.destination,
             "discs": [

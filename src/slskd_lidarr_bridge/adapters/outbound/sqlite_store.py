@@ -35,7 +35,7 @@ DEFAULT_DB_PATH = "/data/bridge.db"
 # Bumped whenever the table layout changes. The database holds a 7-day release
 # cache and in-flight jobs, both cheap to lose, so a mismatch recreates the
 # tables rather than migrating them.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS releases (
@@ -56,9 +56,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     nzo_id      TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
     username    TEXT NOT NULL,
-    files       TEXT NOT NULL,   -- JSON
+    discs       TEXT NOT NULL,   -- JSON
     category    TEXT NOT NULL,
-    album_folder TEXT NOT NULL,
+    destination TEXT NOT NULL,
     total_size  INTEGER NOT NULL,
     created_at  TEXT NOT NULL    -- ISO-8601
 );
@@ -277,7 +277,7 @@ class SqliteStore:
             self._conn.execute(
                 """
                 INSERT INTO jobs
-                    (nzo_id, title, username, files, category, album_folder,
+                    (nzo_id, title, username, discs, category, destination,
                      total_size, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -285,9 +285,9 @@ class SqliteStore:
                     job.nzo_id,
                     job.title,
                     job.username,
-                    _files_to_json(job.files),
+                    _discs_to_json(job.discs),
                     job.category,
-                    job.album_folder,
+                    job.destination,
                     job.total_size,
                     job.created_at.isoformat(),
                 ),
@@ -305,9 +305,9 @@ class SqliteStore:
             nzo_id=row["nzo_id"],
             title=row["title"],
             username=row["username"],
-            files=_json_to_files(row["files"]),
+            discs=_json_to_discs(row["discs"]),
             category=row["category"],
-            album_folder=row["album_folder"],
+            destination=row["destination"],
             total_size=row["total_size"],
             created_at=_parse_dt(row["created_at"]),
         )
@@ -319,9 +319,9 @@ class SqliteStore:
                 nzo_id=row["nzo_id"],
                 title=row["title"],
                 username=row["username"],
-                files=_json_to_files(row["files"]),
+                discs=_json_to_discs(row["discs"]),
                 category=row["category"],
-                album_folder=row["album_folder"],
+                destination=row["destination"],
                 total_size=row["total_size"],
                 created_at=_parse_dt(row["created_at"]),
             )
