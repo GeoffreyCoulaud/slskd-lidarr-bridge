@@ -62,7 +62,12 @@ class FakeGateway:
         return list(self._by_text.get(self._sid_text[search_id], self._default))
 
     # Unused in search service — satisfy Protocol
-    def enqueue(self, username: str, files: list[AudioFile]) -> None: ...
+    def enqueue(
+        self,
+        username: str,
+        files: list[AudioFile],
+        destination: str | None = None,
+    ) -> None: ...
     def transfers(self, username: str) -> list[Transfer]:
         return []
 
@@ -127,7 +132,12 @@ class RacyGateway:
         return list(self._by_text.get(self._sid_text[search_id], self._default))
 
     # Unused in search service — satisfy Protocol
-    def enqueue(self, username: str, files: list[AudioFile]) -> None: ...
+    def enqueue(
+        self,
+        username: str,
+        files: list[AudioFile],
+        destination: str | None = None,
+    ) -> None: ...
     def transfers(self, username: str) -> list[Transfer]:
         return []
 

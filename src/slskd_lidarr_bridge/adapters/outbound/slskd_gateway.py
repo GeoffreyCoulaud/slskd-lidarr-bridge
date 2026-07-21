@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import logging
+import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
 from slskd_lidarr_bridge.domain.models import AudioFile, SearchResponse, Transfer
+
+logger = logging.getLogger(__name__)
+
+
+class EnqueueError(RuntimeError):
+    """slskd accepted the batch request but did not enqueue every file.
+
+    The batch endpoint answers 200 when *every* file failed and 207 when some
+    did, so neither is an HTTP error and neither is a success.
+    """
 
 
 def _extension_from_filename(filename: str) -> str | None:
@@ -56,6 +69,14 @@ class SlskdGateway:
         (a busy swarm never goes idle, so the inactivity timer alone would keep it
         ``InProgress`` for minutes). ``<= 0`` omits the field, falling back to
         slskd's own default (250).
+    enqueue_retry_delays:
+        Delays, in seconds, between retries when slskd answers 429 to a batch
+        enqueue. slskd guards enqueueing with a two-permit semaphore acquired
+        without waiting, so a concurrent grab is throttled immediately rather
+        than queued. One album now costs one request per disc, so retrying
+        briefly is what keeps a multi-disc grab from failing on contention.
+    sleep:
+        Sleep function used between those retries; injectable for tests.
 
     The idle search window is chosen per call by the caller (``SearchService``
     forwards a small, bounded value) and passed to :meth:`start_search`; the poll
@@ -70,6 +91,8 @@ class SlskdGateway:
         client: httpx.Client | None = None,
         timeout: float = 30.0,
         response_limit: int = 100,
+        enqueue_retry_delays: tuple[float, ...] = (0.5, 1.5),
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if client is None:
             self._client = httpx.Client(
@@ -83,6 +106,8 @@ class SlskdGateway:
             self._client = client
         self._response_limit = response_limit
         self._downloads_directory: str | None = None
+        self._enqueue_retry_delays = enqueue_retry_delays
+        self._sleep = sleep
 
     # ------------------------------------------------------------------
     # Internal request helper
@@ -161,13 +186,59 @@ class SlskdGateway:
             )
         return results
 
-    def enqueue(self, username: str, files: list[AudioFile]) -> None:
-        """POST /api/v0/transfers/downloads/{username} with [{filename, size}, ...]."""
-        payload = [{"filename": f.filename, "size": f.size} for f in files]
-        r = self._req(
-            "POST", "api", "v0", "transfers", "downloads", username, json=payload
+    def enqueue(
+        self,
+        username: str,
+        files: list[AudioFile],
+        destination: str | None = None,
+    ) -> None:
+        """POST a download batch, optionally pinning its destination folder.
+
+        ``destination`` is a path relative to slskd's downloads directory. slskd
+        gives it precedence over the user's ``transfers.download.destination``
+        pattern, which is what lets the bridge decide where an album lands and
+        report that exact path to Lidarr. ``None`` leaves the choice to slskd.
+
+        The batch endpoint's status codes are not conventional: 201 means every
+        file was enqueued, 207 that some failed, and **200 that all of them
+        did**. Only 201 is a success.
+        """
+        body: dict[str, object] = {
+            "username": username,
+            "files": [{"filename": f.filename, "size": f.size} for f in files],
+        }
+        if destination is not None:
+            body["options"] = {"destination": destination}
+
+        response = self._post_batch(body)
+
+        if response.status_code in (200, 207):
+            failures = response.json().get("failures", [])
+            detail = "; ".join(
+                f"{f.get('filename')}: {f.get('message')}" for f in failures
+            )
+            raise EnqueueError(
+                f"slskd enqueued {len(files) - len(failures)} of {len(files)} "
+                f"files for {username!r}: {detail}"
+            )
+        response.raise_for_status()
+
+    def _post_batch(self, body: dict[str, object]) -> httpx.Response:
+        """POST the batch, retrying while slskd's enqueue limiter answers 429."""
+        response = self._req(
+            "POST", "api", "v0", "transfers", "downloads", "batches", json=body
         )
-        r.raise_for_status()
+        for delay in self._enqueue_retry_delays:
+            if response.status_code != 429:
+                return response
+            logger.warning(
+                "slskd throttled the enqueue (429); retrying in %.2fs", delay
+            )
+            self._sleep(delay)
+            response = self._req(
+                "POST", "api", "v0", "transfers", "downloads", "batches", json=body
+            )
+        return response
 
     def transfers(self, username: str) -> list[Transfer]:
         """GET transfers for a user, flattening directories→files to list[Transfer].
@@ -226,3 +297,14 @@ class SlskdGateway:
             r.raise_for_status()
             self._downloads_directory = str(r.json()["directories"]["downloads"])
         return self._downloads_directory
+
+    def version(self) -> str:
+        """Return slskd's semantic version (``GET /api/v0/application/version``).
+
+        Deliberately not part of the ``SoulseekGateway`` port: only the
+        composition root reads it, to refuse to start against a slskd too old
+        for batch destinations.
+        """
+        r = self._req("GET", "api", "v0", "application", "version")
+        r.raise_for_status()
+        return str(r.json())

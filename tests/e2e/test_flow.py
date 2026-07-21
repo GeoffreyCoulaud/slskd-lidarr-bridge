@@ -60,7 +60,7 @@ class FakeGateway:
 
     def __init__(self, downloads_dir: str) -> None:
         self._downloads_dir = downloads_dir
-        self._enqueued: list[tuple[str, list[AudioFile]]] = []
+        self._enqueued: list[tuple[str, list[AudioFile], str | None]] = []
         self._cancelled: list[tuple[str, str]] = []
         # Start in-progress; flip to True to simulate completion.
         self.transfers_complete: bool = False
@@ -85,8 +85,13 @@ class FakeGateway:
             )
         ]
 
-    def enqueue(self, username: str, files: list[AudioFile]) -> None:
-        self._enqueued.append((username, files))
+    def enqueue(
+        self,
+        username: str,
+        files: list[AudioFile],
+        destination: str | None = None,
+    ) -> None:
+        self._enqueued.append((username, files, destination))
 
     def transfers(self, username: str) -> list[Transfer]:
         if username != _ALICE:
