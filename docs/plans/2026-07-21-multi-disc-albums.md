@@ -299,9 +299,12 @@ def test_disc_folder_without_any_parent_is_not_promoted():
 
 
 def test_disc_subpath_is_sanitized():
-    a = _f(r"@@ab\Artist\Album\CD:1\01.flac")
+    # The ":" is legal on a Unix share and hostile on Windows, so the subpath
+    # stored is already the on-disk form.
+    a = _f(r"@@ab\Artist\Album\CD1: Bonus\01.flac")
     groups = group_files_by_album([a])
-    assert groups[0].discs == (Disc(subpath="CD_1", files=(a,)),)
+    assert groups[0].album_path == "@@ab/Artist/Album"
+    assert groups[0].discs == (Disc(subpath="CD1_ Bonus", files=(a,)),)
 
 
 def test_group_name_and_parent_name():
@@ -460,7 +463,7 @@ def group_files_by_album(files: Iterable[AudioFile]) -> list[AlbumGroup]:
     Ordering is deterministic: groups by album path, discs by subpath, files by
     filename.
     """
-    by_root: dict[str, dict[str, list[AudioFile]]] = defaultdict(
+    by_root: defaultdict[str, defaultdict[str, list[AudioFile]]] = defaultdict(
         lambda: defaultdict(list)
     )
     for file in files:
@@ -474,12 +477,12 @@ def group_files_by_album(files: Iterable[AudioFile]) -> list[AlbumGroup]:
             discs=tuple(
                 Disc(
                     subpath=subpath,
-                    files=tuple(sorted(discs[subpath], key=lambda f: f.filename)),
+                    files=tuple(sorted(by_subpath[subpath], key=lambda f: f.filename)),
                 )
-                for subpath in sorted(discs)
+                for subpath in sorted(by_subpath)
             ),
         )
-        for root, discs in sorted(by_root.items())
+        for root, by_subpath in sorted(by_root.items())
     ]
 ```
 
