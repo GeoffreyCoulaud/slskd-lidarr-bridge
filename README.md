@@ -1,6 +1,6 @@
 # slskd-lidarr-bridge
 
-A lightweight bridge that makes [slskd](https://github.com/slsknet/slskd) (a Soulseek daemon) look like Usenet to [Lidarr](https://lidarr.audio/). It impersonates a **Newznab indexer** and a **SABnzbd download client**, so Lidarr searches, downloads, and tracks music from Soulseek using its normal Usenet workflow.
+A lightweight bridge that makes [slskd](https://github.com/slskd/slskd) (a Soulseek daemon) look like Usenet to [Lidarr](https://lidarr.audio/). It impersonates a **Newznab indexer** and a **SABnzbd download client**, so Lidarr searches, downloads, and tracks music from Soulseek using its normal Usenet workflow.
 
 > [!NOTE]
 > **A note on authorship:** Almost all of the code in this repository was written by AI coding agents, under human direction and review. The conventions and architectural guardrails those agents follow are documented in [AGENTS.md](AGENTS.md).
@@ -12,7 +12,7 @@ The bridge discovers slskd's completed-downloads directory from slskd's API, so 
 ```yaml
 services:
   slskd:
-    image: slsknet/slskd:latest
+    image: slskd/slskd:latest
     volumes:
       - downloads:/downloads
     environment:
