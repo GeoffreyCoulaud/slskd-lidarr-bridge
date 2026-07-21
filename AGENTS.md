@@ -10,7 +10,7 @@ first. This file covers *how to work in the code*.
 ## What this is
 
 A bridge that impersonates a **Newznab indexer** + **SABnzbd download client**
-in front of [slskd](https://github.com/slsknet/slskd), so Lidarr drives
+in front of [slskd](https://github.com/slskd/slskd), so Lidarr drives
 Soulseek through its normal Usenet workflow. Python 3.12+, Flask served by
 waitress, SQLite for state, `httpx` to talk to slskd.
 
@@ -26,7 +26,8 @@ src/slskd_lidarr_bridge/
 │   ├── models.py           # dataclasses: Release, DownloadJob, SearchResponse, …
 │   ├── search_service.py   # search orchestration (uses ports only)
 │   ├── download_service.py # download orchestration (uses ports only)
-│   ├── paths.py            # storage-path computation (see multi-disc note below)
+│   ├── paths.py            # destination + storage-path computation
+│   ├── albums.py           # disc detection and album grouping
 │   ├── quality.py, titles.py
 ├── adapters/
 │   ├── inbound/            # driving adapters — Flask blueprints, XML/NZB wire formats
