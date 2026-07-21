@@ -23,7 +23,10 @@ from slskd_lidarr_bridge.adapters.inbound.nzb import parse_nzb
 from slskd_lidarr_bridge.adapters.outbound.sqlite_store import open_stores
 from slskd_lidarr_bridge.config import Config
 from slskd_lidarr_bridge.domain.models import AudioFile, SearchResponse, Transfer
-from slskd_lidarr_bridge.domain.paths import compute_storage_path
+from slskd_lidarr_bridge.domain.paths import (
+    build_album_destination,
+    compute_storage_path,
+)
 
 # ---------------------------------------------------------------------------
 # Fake SoulseekGateway
@@ -60,7 +63,7 @@ class FakeGateway:
 
     def __init__(self, downloads_dir: str) -> None:
         self._downloads_dir = downloads_dir
-        self._enqueued: list[tuple[str, list[AudioFile], str | None]] = []
+        self._enqueued: list[tuple[str, list[AudioFile], str]] = []
         self._cancelled: list[tuple[str, str]] = []
         # Start in-progress; flip to True to simulate completion.
         self.transfers_complete: bool = False
@@ -89,7 +92,7 @@ class FakeGateway:
         self,
         username: str,
         files: list[AudioFile],
-        destination: str | None = None,
+        destination: str,
     ) -> None:
         self._enqueued.append((username, files, destination))
 
@@ -107,7 +110,6 @@ class FakeGateway:
                     bytes_transferred=f.size,
                     bytes_remaining=0,
                     percent_complete=100.0,
-                    local_path=None,
                 )
                 for i, f in enumerate(_FILES)
             ]
@@ -232,7 +234,7 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     nzb_bytes = resp.data
     payload = parse_nzb(nzb_bytes)
     assert payload["username"] == _ALICE
-    assert len(payload["files"]) == len(_FILES)
+    assert sum(len(d["files"]) for d in payload["discs"]) == len(_FILES)
 
     # ------------------------------------------------------------------
     # Step 4: POST addfile multipart → capture nzo_id
@@ -292,7 +294,8 @@ def test_full_lidarr_lifecycle(client, gateway, downloads_dir):
     assert completed_slot["status"] == "Completed"
     assert completed_slot["category"] == "music"
     assert completed_slot["storage"], "storage path must be non-empty when completed"
-    expected_storage = compute_storage_path(downloads_dir, _FILES[0].filename)
+    expected_destination = build_album_destination("In Rainbows", _ALICE)
+    expected_storage = compute_storage_path(downloads_dir, expected_destination)
     assert completed_slot["storage"] == expected_storage, (
         f"storage {completed_slot['storage']!r} != expected {expected_storage!r}"
     )

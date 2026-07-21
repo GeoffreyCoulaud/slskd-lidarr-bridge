@@ -190,14 +190,14 @@ class SlskdGateway:
         self,
         username: str,
         files: list[AudioFile],
-        destination: str | None = None,
+        destination: str,
     ) -> None:
-        """POST a download batch, optionally pinning its destination folder.
+        """POST a download batch, pinning its destination folder.
 
         ``destination`` is a path relative to slskd's downloads directory. slskd
         gives it precedence over the user's ``transfers.download.destination``
         pattern, which is what lets the bridge decide where an album lands and
-        report that exact path to Lidarr. ``None`` leaves the choice to slskd.
+        report that exact path to Lidarr.
 
         The batch endpoint's status codes are not conventional: 201 means every
         file was enqueued, 207 that some failed, and **200 that all of them
@@ -206,9 +206,8 @@ class SlskdGateway:
         body: dict[str, object] = {
             "username": username,
             "files": [{"filename": f.filename, "size": f.size} for f in files],
+            "options": {"destination": destination},
         }
-        if destination is not None:
-            body["options"] = {"destination": destination}
 
         response = self._post_batch(body)
 
@@ -244,8 +243,6 @@ class SlskdGateway:
         """GET transfers for a user, flattening directories→files to list[Transfer].
 
         slskd groups transfers by directory; we flatten all files.
-        Note: slskd does not expose a local on-disk path in this payload,
-        so local_path is always None.
         """
         r = self._req("GET", "api", "v0", "transfers", "downloads", username)
         if r.status_code == 404:
@@ -265,7 +262,6 @@ class SlskdGateway:
                         bytes_remaining=f.get("bytesRemaining", 0),
                         percent_complete=float(f.get("percentComplete", 0.0)),
                         exception=f.get("exception") or None,
-                        local_path=None,  # slskd does not expose an on-disk path here
                     )
                 )
         return result

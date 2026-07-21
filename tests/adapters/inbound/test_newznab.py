@@ -387,9 +387,7 @@ class TestNzbRoute:
         payload = parse_nzb(resp.data)
         assert payload["username"] == release.username
         assert payload["title"] == release.title
-        assert payload["album_folder"] == release.destination  # legacy key
         assert payload["total_size"] == release.size
-        assert len(payload["files"]) == len(release.files)
         assert payload["destination"] == release.destination
         assert len(payload["discs"]) == len(release.discs)
         assert payload["discs"][0]["subpath"] == release.discs[0].subpath

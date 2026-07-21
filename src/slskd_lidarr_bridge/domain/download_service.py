@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Sequence
 from datetime import datetime
-from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
-from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, JobStatusView
-from slskd_lidarr_bridge.domain.paths import compute_storage_path
+from slskd_lidarr_bridge.domain.models import (
+    AudioFile,
+    Disc,
+    DownloadJob,
+    JobStatusView,
+)
+from slskd_lidarr_bridge.domain.paths import batch_destination, compute_storage_path
 from slskd_lidarr_bridge.domain.ports import Clock, JobStore, SoulseekGateway
 
 logger = logging.getLogger(__name__)
@@ -55,17 +60,48 @@ class DownloadService:
         return self._gateway.downloads_directory()
 
     def start(self, payload: dict[str, Any], category: str) -> str:
-        """Enqueue files on slskd, persist a DownloadJob, return its nzo_id."""
+        """Enqueue one slskd batch per disc, persist a DownloadJob, return its id.
+
+        A batch destination is what puts every disc under one album folder, so
+        the batches are issued per disc. They are not atomic: if a later disc
+        fails, the discs already queued are cancelled, otherwise they would keep
+        downloading into a folder Lidarr is never told about.
+        """
         username: str = payload["username"]
         title: str = payload["title"]
-        album_folder: str = payload["album_folder"]
+        destination: str = payload["destination"]
         total_size: int = payload["total_size"]
 
-        files = tuple(
-            AudioFile(filename=f["filename"], size=f["size"]) for f in payload["files"]
+        discs = tuple(
+            Disc(
+                subpath=d["subpath"],
+                files=tuple(
+                    AudioFile(filename=f["filename"], size=f["size"])
+                    for f in d["files"]
+                ),
+            )
+            for d in payload["discs"]
         )
 
-        self._gateway.enqueue(username, list(files))
+        queued: list[Disc] = []
+        try:
+            for disc in discs:
+                self._gateway.enqueue(
+                    username,
+                    list(disc.files),
+                    batch_destination(destination, disc.subpath),
+                )
+                queued.append(disc)
+        except Exception:
+            if queued:
+                logger.warning(
+                    "Enqueue of %r failed partway through; cancelling %d disc(s) "
+                    "already queued",
+                    title,
+                    len(queued),
+                )
+                self._cancel_files(username, [f for d in queued for f in d.files])
+            raise
 
         nzo_id = "SABnzbd_nzo_" + uuid4().hex[:12]
 
@@ -73,15 +109,42 @@ class DownloadService:
             nzo_id=nzo_id,
             title=title,
             username=username,
-            files=files,
+            discs=discs,
             category=category,
-            album_folder=album_folder,
+            destination=destination,
             total_size=total_size,
             created_at=self._clock.now(),
         )
         self._jobs.add(job)
         logger.info("Enqueued download %s: %r (cat=%r)", nzo_id, title, category)
         return nzo_id
+
+    def _cancel_files(self, username: str, files: Sequence[AudioFile]) -> None:
+        """Cancel any in-progress transfer among *files*.
+
+        Best effort: a peer or slskd failing here must not stop the caller, who
+        is either already handling an error or removing a job that Lidarr
+        considers gone.
+        """
+        wanted = {f.filename for f in files}
+        try:
+            transfers = self._gateway.transfers(username)
+        except Exception:
+            logger.warning(
+                "Could not list %r's transfers to cancel them", username, exc_info=True
+            )
+            return
+        for transfer in transfers:
+            if transfer.filename in wanted and not transfer.is_complete:
+                try:
+                    self._gateway.cancel(username, transfer.id)
+                except Exception:
+                    logger.warning(
+                        "Could not cancel transfer %s for %r",
+                        transfer.id,
+                        username,
+                        exc_info=True,
+                    )
 
     def statuses(self) -> list[JobStatusView]:
         """Return a JobStatusView for every tracked job."""
@@ -112,13 +175,9 @@ class DownloadService:
 
             if len(matched) == len(job.files) and all(t.is_succeeded for t in matched):
                 state = "completed"
-                lp = next((t.local_path for t in matched if t.local_path), None)
-                if lp:
-                    storage = str(PurePosixPath(lp).parent)
-                else:
-                    storage = compute_storage_path(
-                        self._gateway.downloads_directory(), job.files[0].filename
-                    )
+                storage = compute_storage_path(
+                    self._gateway.downloads_directory(), job.destination
+                )
             elif any(t.is_failed for t in matched):
                 # Atomic check-and-increment under the lock so two concurrent
                 # threads cannot both read the same used count and both retry.
@@ -132,15 +191,36 @@ class DownloadService:
                         self._progress[job.nzo_id] = (transferred_bytes, now)
                 if do_retry:
                     failed_names = {t.filename for t in matched if t.is_failed}
-                    retry_files = [f for f in job.files if f.filename in failed_names]
-                    self._gateway.enqueue(job.username, retry_files)  # I/O outside lock
-                    logger.info(
-                        "Retrying download %s after failure (attempt %d/%d): %r",
-                        job.nzo_id,
-                        used + 1,
-                        self._max_retries,
-                        job.title,
-                    )
+                    try:
+                        for disc in job.discs:
+                            retry_files = [
+                                f for f in disc.files if f.filename in failed_names
+                            ]
+                            if retry_files:
+                                self._gateway.enqueue(
+                                    job.username,
+                                    retry_files,
+                                    batch_destination(job.destination, disc.subpath),
+                                )
+                    except Exception:
+                        # Never let this escape: statuses() backs SABnzbd's queue
+                        # endpoint, and an exception here makes Lidarr treat the
+                        # whole download client as down. The stall detector is
+                        # the backstop.
+                        logger.warning(
+                            "Retry enqueue failed for %s (%r)",
+                            job.nzo_id,
+                            job.title,
+                            exc_info=True,
+                        )
+                    else:
+                        logger.info(
+                            "Retrying download %s after failure (attempt %d/%d): %r",
+                            job.nzo_id,
+                            used + 1,
+                            self._max_retries,
+                            job.title,
+                        )
                 else:
                     state = "failed"
                     failed = next(t for t in matched if t.is_failed)
@@ -222,15 +302,7 @@ class DownloadService:
         if job is None:
             return
 
-        # I/O outside the lock.
-        all_transfers = self._gateway.transfers(job.username)
-        job_filenames = {f.filename for f in job.files}
-        matched = [t for t in all_transfers if t.filename in job_filenames]
-
-        for transfer in matched:
-            if not transfer.is_complete:
-                self._gateway.cancel(job.username, transfer.id)
-
+        self._cancel_files(job.username, job.files)
         self._jobs.remove(nzo_id)
         # In-memory cleanup under the lock.
         with self._lock:

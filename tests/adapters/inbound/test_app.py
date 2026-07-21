@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from slskd_lidarr_bridge.adapters.inbound.app import create_app
 from slskd_lidarr_bridge.config import Config
-from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob
+from slskd_lidarr_bridge.domain.models import AudioFile, Disc, DownloadJob
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -117,9 +117,14 @@ class FakeJobStoreWithOneJob:
                 nzo_id="nzo1",
                 title="Title",
                 username="user1",
-                files=(AudioFile(filename=r"user1\Music\01.flac", size=1000),),
+                discs=(
+                    Disc(
+                        subpath="",
+                        files=(AudioFile(filename=r"user1\Music\01.flac", size=1000),),
+                    ),
+                ),
                 category="music",
-                album_folder="Album",
+                destination="Album",
                 total_size=1000,
                 created_at=CREATED_AT,
             )

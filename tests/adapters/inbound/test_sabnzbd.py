@@ -84,12 +84,17 @@ def _sample_nzb() -> bytes:
         {
             "username": "user1",
             "title": "Artist - Album [FLAC]",
-            "album_folder": "Album",
+            "destination": "Album",
             "total_size": 10_000_000,
-            "files": [
+            "discs": [
                 {
-                    "filename": r"user1\Music\Artist\Album\01.flac",
-                    "size": 10_000_000,
+                    "subpath": "",
+                    "files": [
+                        {
+                            "filename": r"user1\Music\Artist\Album\01.flac",
+                            "size": 10_000_000,
+                        }
+                    ],
                 }
             ],
         }
@@ -238,7 +243,7 @@ class TestAddFile:
         payload, _ = svc.started[0]
         assert payload["username"] == "user1"
         assert payload["title"] == "Artist - Album [FLAC]"
-        assert payload["album_folder"] == "Album"
+        assert payload["destination"] == "Album"
 
     def test_addfile_no_file_returns_status_false(self):
         """addfile without a 'name' file field returns status:false (HTTP 200)."""

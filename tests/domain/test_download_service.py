@@ -10,6 +10,7 @@ import pytest
 from slskd_lidarr_bridge.domain.download_service import DownloadService
 from slskd_lidarr_bridge.domain.models import (
     AudioFile,
+    Disc,
     DownloadJob,
     SearchResponse,
     Transfer,
@@ -26,12 +27,17 @@ class FakeGateway:
         transfers_by_username: dict[str, list[Transfer]] | None = None,
     ) -> None:
         self._transfers = transfers_by_username or {}
-        self.enqueued: list[tuple[str, list[AudioFile], str | None]] = []
         self.cancelled: list[tuple[str, str]] = []
         # Optional service reference — when set, I/O methods assert not locked.
         self.service: DownloadService | None = None
         # Count calls per username for batching assertions.
         self.transfers_call_count: dict[str, int] = {}
+        self.enqueued: list[tuple[str, list[AudioFile], str]] = []
+        # None: never fail. N: raise on the (N+1)-th enqueue call.
+        self.fail_enqueue_after: int | None = None
+        # Failure hooks exercising both except arms of the cancellation helper.
+        self.fail_transfers: bool = False
+        self.fail_cancel: bool = False
 
     def _assert_not_locked(self) -> None:
         if self.service is not None:
@@ -49,13 +55,12 @@ class FakeGateway:
     def search_responses(self, search_id: str) -> list[SearchResponse]:
         return []
 
-    def enqueue(
-        self,
-        username: str,
-        files: list[AudioFile],
-        destination: str | None = None,
-    ) -> None:
+    def enqueue(self, username: str, files: list[AudioFile], destination: str) -> None:
         self._assert_not_locked()
+        if self.fail_enqueue_after is not None and (
+            len(self.enqueued) >= self.fail_enqueue_after
+        ):
+            raise RuntimeError("slskd said no")
         self.enqueued.append((username, list(files), destination))
 
     def transfers(self, username: str) -> list[Transfer]:
@@ -63,6 +68,8 @@ class FakeGateway:
         self.transfers_call_count[username] = (
             self.transfers_call_count.get(username, 0) + 1
         )
+        if self.fail_transfers:
+            raise RuntimeError("slskd unreachable")
         return list(self._transfers.get(username, []))
 
     def set_transfers(self, username: str, transfers: list[Transfer]) -> None:
@@ -71,6 +78,8 @@ class FakeGateway:
 
     def cancel(self, username: str, transfer_id: str) -> None:
         self._assert_not_locked()
+        if self.fail_cancel:
+            raise RuntimeError("slskd unreachable")
         self.cancelled.append((username, transfer_id))
 
     def downloads_directory(self) -> str:
@@ -116,11 +125,16 @@ class FakeClock:
 SAMPLE_PAYLOAD: dict = {
     "username": "alice",
     "title": "Artist - Album [FLAC]",
-    "album_folder": "Album",
+    "destination": "Album",
     "total_size": 20_000_000,
-    "files": [
-        {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
-        {"filename": r"@@a\Artist\Album\02.flac", "size": 10_000_000},
+    "discs": [
+        {
+            "subpath": "",
+            "files": [
+                {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
+                {"filename": r"@@a\Artist\Album\02.flac", "size": 10_000_000},
+            ],
+        }
     ],
 }
 
@@ -128,10 +142,15 @@ SAMPLE_PAYLOAD: dict = {
 SAMPLE_PAYLOAD_1: dict = {
     "username": "alice",
     "title": "Artist - Album [FLAC]",
-    "album_folder": "Album",
+    "destination": "Album",
     "total_size": 10_000_000,
-    "files": [
-        {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
+    "discs": [
+        {
+            "subpath": "",
+            "files": [
+                {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
+            ],
+        }
     ],
 }
 
@@ -145,7 +164,6 @@ def make_transfer(
     bytes_transferred: int = 0,
     size: int = 10_000_000,
     exception: str | None = None,
-    local_path: str | None = None,
 ) -> Transfer:
     return Transfer(
         username=username,
@@ -157,7 +175,6 @@ def make_transfer(
         bytes_remaining=size - bytes_transferred,
         percent_complete=bytes_transferred / size * 100 if size else 0.0,
         exception=exception,
-        local_path=local_path,
     )
 
 
@@ -187,7 +204,7 @@ def test_start_enqueues_files_on_gateway():
     assert len(gateway.enqueued) == 1
     username, files, destination = gateway.enqueued[0]
     assert username == "alice"
-    assert destination is None
+    assert destination == "Album"
     assert len(files) == 2
     assert all(isinstance(f, AudioFile) for f in files)
     assert files[0].filename == r"@@a\Artist\Album\01.flac"
@@ -207,8 +224,241 @@ def test_start_persists_download_job():
     assert job.title == "Artist - Album [FLAC]"
     assert job.category == "music"
     assert job.total_size == 20_000_000
-    assert job.album_folder == "Album"
+    assert job.destination == "Album"
     assert len(job.files) == 2
+
+
+def _payload(discs, destination="Album [bob]"):
+    return {
+        "username": "bob",
+        "title": "Artist - Album [FLAC]-bob",
+        "destination": destination,
+        "total_size": sum(f["size"] for d in discs for f in d["files"]),
+        "discs": discs,
+    }
+
+
+def test_start_enqueues_one_batch_per_disc():
+    gateway = FakeGateway()
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+
+    service.start(
+        _payload(
+            [
+                {
+                    "subpath": "CD1",
+                    "files": [{"filename": r"@@a\Al\CD1\1.flac", "size": 5}],
+                },
+                {
+                    "subpath": "CD2",
+                    "files": [{"filename": r"@@a\Al\CD2\1.flac", "size": 7}],
+                },
+            ]
+        ),
+        "music",
+    )
+
+    assert [(u, d) for u, _, d in gateway.enqueued] == [
+        ("bob", "Album [bob]/CD1"),
+        ("bob", "Album [bob]/CD2"),
+    ]
+
+
+def test_start_of_a_single_disc_album_uses_the_album_folder_itself():
+    gateway = FakeGateway()
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+
+    service.start(
+        _payload(
+            [{"subpath": "", "files": [{"filename": r"@@a\Al\1.flac", "size": 5}]}]
+        ),
+        "music",
+    )
+
+    assert gateway.enqueued[0][2] == "Album [bob]"
+
+
+def test_start_cancels_what_it_queued_when_a_later_disc_fails():
+    # Without this, disc 1 keeps downloading into a folder Lidarr will never be
+    # told about: silent disk fill.
+    gateway = FakeGateway(
+        transfers_by_username={
+            "bob": [
+                Transfer(
+                    username="bob",
+                    id="t1",
+                    filename=r"@@a\Al\CD1\1.flac",
+                    size=5,
+                    state="InProgress",
+                    bytes_transferred=1,
+                    bytes_remaining=4,
+                    percent_complete=20.0,
+                )
+            ]
+        }
+    )
+    gateway.fail_enqueue_after = 1
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+
+    with pytest.raises(RuntimeError):
+        service.start(
+            _payload(
+                [
+                    {
+                        "subpath": "CD1",
+                        "files": [{"filename": r"@@a\Al\CD1\1.flac", "size": 5}],
+                    },
+                    {
+                        "subpath": "CD2",
+                        "files": [{"filename": r"@@a\Al\CD2\1.flac", "size": 7}],
+                    },
+                ]
+            ),
+            "music",
+        )
+
+    assert gateway.cancelled == [("bob", "t1")]
+
+
+def test_start_does_not_cancel_when_the_very_first_disc_fails():
+    gateway = FakeGateway()
+    gateway.fail_enqueue_after = 0
+    service = DownloadService(gateway, FakeJobStore(), FakeClock())
+
+    with pytest.raises(RuntimeError):
+        service.start(
+            _payload(
+                [{"subpath": "CD1", "files": [{"filename": "a.flac", "size": 5}]}]
+            ),
+            "music",
+        )
+
+    assert gateway.cancelled == []
+
+
+def test_completed_job_reports_the_destination_as_its_storage_path():
+    job = DownloadJob(
+        nzo_id="SABnzbd_nzo_1",
+        title="t",
+        username="bob",
+        discs=(
+            Disc(
+                subpath="CD1",
+                files=(AudioFile(filename=r"@@a\Al\CD1\1.flac", size=5),),
+            ),
+        ),
+        category="music",
+        destination="Album [bob]",
+        total_size=5,
+        created_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+    gateway = FakeGateway(
+        transfers_by_username={
+            "bob": [
+                Transfer(
+                    username="bob",
+                    id="t1",
+                    filename=r"@@a\Al\CD1\1.flac",
+                    size=5,
+                    state="Completed, Succeeded",
+                    bytes_transferred=5,
+                    bytes_remaining=0,
+                    percent_complete=100.0,
+                )
+            ]
+        }
+    )
+    jobs = FakeJobStore()
+    jobs.add(job)
+    service = DownloadService(gateway, jobs, FakeClock())
+
+    view = service.statuses()[0]
+
+    assert view.state == "completed"
+    assert view.storage == "/downloads/Album [bob]"
+
+
+def _failed_transfer(filename: str, size: int, transfer_id: str) -> Transfer:
+    return Transfer(
+        username="bob",
+        id=transfer_id,
+        filename=filename,
+        size=size,
+        state="Completed, Errored",
+        bytes_transferred=0,
+        bytes_remaining=size,
+        percent_complete=0.0,
+        exception="peer went away",
+    )
+
+
+def test_retry_reenqueues_failed_files_into_their_own_disc():
+    cd1 = AudioFile(filename=r"@@a\Al\CD1\1.flac", size=5)
+    cd2 = AudioFile(filename=r"@@a\Al\CD2\1.flac", size=7)
+    job = DownloadJob(
+        nzo_id="SABnzbd_nzo_1",
+        title="t",
+        username="bob",
+        discs=(Disc(subpath="CD1", files=(cd1,)), Disc(subpath="CD2", files=(cd2,))),
+        category="music",
+        destination="Album [bob]",
+        total_size=12,
+        created_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+    gateway = FakeGateway(
+        transfers_by_username={
+            "bob": [
+                Transfer(
+                    username="bob",
+                    id="t1",
+                    filename=cd1.filename,
+                    size=5,
+                    state="Completed, Succeeded",
+                    bytes_transferred=5,
+                    bytes_remaining=0,
+                    percent_complete=100.0,
+                ),
+                _failed_transfer(cd2.filename, 7, "t2"),
+            ]
+        }
+    )
+    jobs = FakeJobStore()
+    jobs.add(job)
+    service = DownloadService(gateway, jobs, FakeClock())
+
+    service.statuses()
+
+    assert gateway.enqueued == [("bob", [cd2], "Album [bob]/CD2")]
+
+
+def test_a_failing_retry_does_not_break_the_queue_listing(caplog):
+    # An exception here would fail SABnzbd's whole queue endpoint, which makes
+    # Lidarr treat the download client as down. The stall detector is the
+    # backstop instead.
+    failed = AudioFile(filename=r"@@a\Al\CD1\1.flac", size=5)
+    job = DownloadJob(
+        nzo_id="SABnzbd_nzo_1",
+        title="t",
+        username="bob",
+        discs=(Disc(subpath="CD1", files=(failed,)),),
+        category="music",
+        destination="Album [bob]",
+        total_size=5,
+        created_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+    gateway = FakeGateway(
+        transfers_by_username={"bob": [_failed_transfer(failed.filename, 5, "t1")]}
+    )
+    gateway.fail_enqueue_after = 0
+    jobs = FakeJobStore()
+    jobs.add(job)
+    service = DownloadService(gateway, jobs, FakeClock())
+
+    with caplog.at_level(logging.WARNING):
+        views = service.statuses()
+
+    assert [v.state for v in views] == ["downloading"]
+    assert "Retry enqueue failed" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -301,48 +551,22 @@ def test_statuses_completed_uses_compute_storage_path():
     assert v.fail_message is None
 
 
-def test_statuses_completed_uses_local_path_parent_when_set():
-    gateway = FakeGateway(
-        transfers_by_username={
-            "alice": [
-                make_transfer(
-                    r"@@a\Artist\Album\01.flac",
-                    transfer_id="t1",
-                    state="Completed, Succeeded",
-                    bytes_transferred=10_000_000,
-                    local_path="/actual/path/to/Album/01.flac",
-                ),
-                make_transfer(
-                    r"@@a\Artist\Album\02.flac",
-                    transfer_id="t2",
-                    state="Completed, Succeeded",
-                    bytes_transferred=10_000_000,
-                    local_path="/actual/path/to/Album/02.flac",
-                ),
-            ]
-        }
-    )
-    service = DownloadService(gateway, FakeJobStore(), FakeClock())
-    service.start(SAMPLE_PAYLOAD, "music")
-
-    views = service.statuses()
-
-    assert len(views) == 1
-    assert views[0].state == "completed"
-    assert views[0].storage == "/actual/path/to/Album"
-
-
 def test_statuses_partial_match_is_downloading():
     """3-file job where only 2 transfers are returned (both Succeeded) → downloading."""
     payload_3: dict = {
         "username": "alice",
         "title": "Artist - Album [FLAC]",
-        "album_folder": "Album",
+        "destination": "Album",
         "total_size": 30_000_000,
-        "files": [
-            {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
-            {"filename": r"@@a\Artist\Album\02.flac", "size": 10_000_000},
-            {"filename": r"@@a\Artist\Album\03.flac", "size": 10_000_000},
+        "discs": [
+            {
+                "subpath": "",
+                "files": [
+                    {"filename": r"@@a\Artist\Album\01.flac", "size": 10_000_000},
+                    {"filename": r"@@a\Artist\Album\02.flac", "size": 10_000_000},
+                    {"filename": r"@@a\Artist\Album\03.flac", "size": 10_000_000},
+                ],
+            }
         ],
     }
     # Only 2 of 3 transfers returned, both succeeded
@@ -550,7 +774,7 @@ def test_statuses_failed_transfer_is_retried_and_reported_downloading():
     assert len(gateway.enqueued) == 2
     username, files, destination = gateway.enqueued[1]
     assert username == "alice"
-    assert destination is None
+    assert destination == "Album"
     assert [f.filename for f in files] == [r"@@a\Artist\Album\01.flac"]
 
 
@@ -638,6 +862,44 @@ def test_remove_unknown_id_is_noop():
     service.remove("SABnzbd_nzo_doesnotexist")
 
     assert gateway.cancelled == []
+
+
+def test_remove_swallows_a_transfers_listing_failure(caplog):
+    """remove() must not raise if listing transfers to cancel fails.
+
+    remove() shares _cancel_files with start()'s compensation path; it is best
+    effort so a peer or slskd failing here cannot leave a job undeletable in
+    Lidarr.
+    """
+    gateway = FakeGateway()
+    jobs = FakeJobStore()
+    service = DownloadService(gateway, jobs, FakeClock())
+    nzo_id = service.start(SAMPLE_PAYLOAD_1, "music")
+    gateway.fail_transfers = True
+
+    with caplog.at_level(logging.WARNING):
+        service.remove(nzo_id)  # must not raise
+
+    assert jobs.get(nzo_id) is None
+    assert "Could not list" in caplog.text
+
+
+def test_remove_swallows_a_cancel_failure(caplog):
+    """remove() must not raise if cancelling a matched transfer fails."""
+    in_progress = make_transfer(
+        r"@@a\Artist\Album\01.flac", transfer_id="t1", state="InProgress"
+    )
+    gateway = FakeGateway(transfers_by_username={"alice": [in_progress]})
+    jobs = FakeJobStore()
+    service = DownloadService(gateway, jobs, FakeClock())
+    nzo_id = service.start(SAMPLE_PAYLOAD_1, "music")
+    gateway.fail_cancel = True
+
+    with caplog.at_level(logging.WARNING):
+        service.remove(nzo_id)  # must not raise
+
+    assert jobs.get(nzo_id) is None
+    assert "Could not cancel transfer" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -890,10 +1152,15 @@ def test_completed_job_never_auto_purged():
 SAMPLE_PAYLOAD_2: dict = {
     "username": "alice",
     "title": "Artist - Album2 [FLAC]",
-    "album_folder": "Album2",
+    "destination": "Album2",
     "total_size": 10_000_000,
-    "files": [
-        {"filename": r"@@a\Artist\Album2\01.flac", "size": 10_000_000},
+    "discs": [
+        {
+            "subpath": "",
+            "files": [
+                {"filename": r"@@a\Artist\Album2\01.flac", "size": 10_000_000},
+            ],
+        }
     ],
 }
 

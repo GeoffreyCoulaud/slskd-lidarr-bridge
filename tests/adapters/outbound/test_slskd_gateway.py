@@ -283,16 +283,6 @@ def test_enqueue_posts_a_batch_with_its_destination(respx_mock) -> None:
     }
 
 
-def test_enqueue_omits_options_without_a_destination(respx_mock) -> None:
-    route = respx_mock.post("http://slskd/api/v0/transfers/downloads/batches").mock(
-        return_value=httpx.Response(201, json={"batch": {}, "failures": []})
-    )
-
-    _gateway().enqueue("bob", [AudioFile(filename="x.flac", size=1)])
-
-    assert "options" not in json.loads(route.calls[0].request.content)
-
-
 def test_enqueue_raises_when_slskd_enqueued_nothing(respx_mock) -> None:
     # 200 means every file failed, not success. A bare raise_for_status would
     # read it as a win.
@@ -445,7 +435,6 @@ def test_transfers_flattens_directories():
     assert t1.bytes_remaining == 0
     assert t1.percent_complete == 100.0
     assert t1.exception is None
-    assert t1.local_path is None
     assert t1.is_succeeded is True
 
     t2 = transfers[1]
