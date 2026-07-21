@@ -87,11 +87,11 @@ runs the same gate and will block otherwise.
 
 ## Gotchas
 
-- **Multi-disc albums are unsupported** and this is by design, not a bug — slskd
-  flattens each disc into its own folder with no shared album root, so the bridge
-  cannot reassemble them. The blocked prerequisite and planned fix live in the
-  `compute_storage_path` docstring in `domain/paths.py`. Don't "fix" this without
-  reading that first.
+- **Multi-disc albums** are grouped at search time (`domain/albums.py`) and
+  downloaded one slskd batch per disc into `<album> [<peer>]/<disc>`
+  (`domain/download_service.py`). This needs slskd >= 0.26.0, whose batch
+  endpoint accepts a destination; the design and the verified slskd contract are
+  in `docs/specs/2026-07-21-multi-disc-albums-design.md`.
 - **Env vars are namespaced** (`SLSKD_*`, `BRIDGE_*`) and documented in the README
   table. Add new ones to both `config.py` and that table.
 
