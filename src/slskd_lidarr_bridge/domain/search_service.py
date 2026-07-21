@@ -5,14 +5,15 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import logging
-from collections import defaultdict
 
+from slskd_lidarr_bridge.domain.albums import group_files_by_album
 from slskd_lidarr_bridge.domain.models import (
     AudioFile,
     Release,
     SearchQuery,
     SearchResponse,
 )
+from slskd_lidarr_bridge.domain.paths import build_album_destination
 from slskd_lidarr_bridge.domain.ports import Clock, ReleaseStore, SoulseekGateway
 from slskd_lidarr_bridge.domain.quality import detect_quality
 from slskd_lidarr_bridge.domain.query_candidates import generate_candidates
@@ -153,33 +154,30 @@ class SearchService:
             if not audio:
                 continue
 
-            groups: dict[str, list[AudioFile]] = defaultdict(list)
-            for f in audio:
-                groups[f.album_folder].append(f)
-
-            for folder, files in groups.items():
-                key = (response.username, folder)
+            for group in group_files_by_album(audio):
+                key = (response.username, group.album_path)
                 if key in seen:
                     continue
 
+                folder = group.name
                 if " - " in folder:
                     left, right = folder.split(" - ", 1)
                     artist, album = left.strip(), right.strip()
                 else:
                     album = folder
-                    artist = files[0].artist_folder
+                    artist = group.parent_name
 
-                size = sum(f.size for f in files)
-                quality = detect_quality(files)
+                quality = detect_quality(group.files)
                 title = build_title(artist, album, quality, response.username)
                 release = Release(
                     artist=artist,
                     album=album,
                     title=title,
                     username=response.username,
-                    files=tuple(files),
-                    size=size,
-                    album_folder=folder,
+                    discs=group.discs,
+                    size=sum(f.size for f in group.files),
+                    album_path=group.album_path,
+                    destination=build_album_destination(folder, response.username),
                     quality=quality,
                     created_at=self._clock.now(),
                 )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import gc
 import hashlib
+import logging
 import sqlite3
 import warnings
 from datetime import UTC, datetime
@@ -12,10 +13,11 @@ from datetime import UTC, datetime
 import pytest
 
 from slskd_lidarr_bridge.adapters.outbound.sqlite_store import (
+    SCHEMA_VERSION,
     SqliteStore,
     open_stores,
 )
-from slskd_lidarr_bridge.domain.models import AudioFile, DownloadJob, Release
+from slskd_lidarr_bridge.domain.models import AudioFile, Disc, DownloadJob, Release
 from slskd_lidarr_bridge.domain.ports import JobStore, ReleaseStore
 
 # ---------------------------------------------------------------------------
@@ -45,16 +47,18 @@ def make_release(
     created_at: datetime = DT_NOW,
     *,
     username: str = "peer1",
-    album_folder: str = "Album",
+    album_path: str = "@@a/Album",
 ) -> Release:
+    folder_name = album_path.rsplit("/", 1)[-1]
     return Release(
         artist="Test Artist",
         album="Test Album",
         title="Test Artist - Test Album [FLAC]",
         username=username,
-        files=(FILE1, FILE2),
+        discs=(Disc(subpath="", files=(FILE1, FILE2)),),
         size=55_000_000,
-        album_folder=album_folder,
+        album_path=album_path,
+        destination=f"{folder_name} [{username}]",
         quality="FLAC",
         created_at=created_at,
     )
@@ -129,9 +133,11 @@ def test_release_put_returns_id_and_get_roundtrips(stores, tmp_path):
     assert fetched.title == rel.title
     assert fetched.username == rel.username
     assert fetched.size == rel.size
-    assert fetched.album_folder == rel.album_folder
+    assert fetched.album_path == rel.album_path
+    assert fetched.destination == rel.destination
     assert fetched.quality == rel.quality
     assert fetched.created_at == rel.created_at
+    assert [d.subpath for d in fetched.discs] == [d.subpath for d in rel.discs]
     assert len(fetched.files) == 2
     assert fetched.files[0].filename == FILE1.filename
     assert fetched.files[0].size == FILE1.size
@@ -155,10 +161,10 @@ def test_release_get_does_not_return_jobs(stores, tmp_path):
 
 def test_release_purge_older_than(stores, tmp_path):
     rs, _ = stores(str(tmp_path / "db.sqlite"))
-    # Distinct folders → distinct ids (the id is derived from the folder), so the
-    # two rows are independent and only the older one is purged.
-    old_id = rs.put(make_release(created_at=DT_OLD, album_folder="OldAlbum"))
-    new_id = rs.put(make_release(created_at=DT_NOW, album_folder="NewAlbum"))
+    # Distinct album paths → distinct ids (the id is derived from the path), so
+    # the two rows are independent and only the older one is purged.
+    old_id = rs.put(make_release(created_at=DT_OLD, album_path="@@a/OldAlbum"))
+    new_id = rs.put(make_release(created_at=DT_NOW, album_path="@@a/NewAlbum"))
     assert old_id != new_id
 
     cutoff = datetime(2024, 3, 1, tzinfo=UTC)
@@ -209,16 +215,16 @@ def test_release_naive_created_at_is_read_back_as_utc(stores, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Deterministic release id (SHA-256 of username + album_folder)
+# Deterministic release id (SHA-256 of username + album_path)
 # ---------------------------------------------------------------------------
 
 
 def test_release_id_is_sha256_of_username_and_folder(stores, tmp_path):
     rs, _ = stores(str(tmp_path / "db.sqlite"))
-    rel = make_release(username="alice", album_folder="Cool Album (Deluxe)")
+    rel = make_release(username="alice", album_path="@@a/Cool Album (Deluxe)")
     rid = rs.put(rel)
 
-    expected = hashlib.sha256(b"alice\x00Cool Album (Deluxe)").hexdigest()
+    expected = hashlib.sha256(b"alice\x00@@a/Cool Album (Deluxe)").hexdigest()
     assert rid == expected
 
 
@@ -243,9 +249,9 @@ def test_release_put_same_folder_is_idempotent_and_replaces(stores, tmp_path):
 
 def test_release_id_differs_by_username_and_by_folder(stores, tmp_path):
     rs, _ = stores(str(tmp_path / "db.sqlite"))
-    base = rs.put(make_release(username="u1", album_folder="A"))
-    other_user = rs.put(make_release(username="u2", album_folder="A"))
-    other_folder = rs.put(make_release(username="u1", album_folder="B"))
+    base = rs.put(make_release(username="u1", album_path="@@a/A"))
+    other_user = rs.put(make_release(username="u2", album_path="@@a/A"))
+    other_folder = rs.put(make_release(username="u1", album_path="@@a/B"))
 
     assert len({base, other_user, other_folder}) == 3
 
@@ -388,3 +394,48 @@ def test_closed_stores_emit_no_resource_warning(tmp_path):
         gc.collect()
     resource_warnings = [w for w in caught if issubclass(w.category, ResourceWarning)]
     assert resource_warnings == []
+
+
+# ---------------------------------------------------------------------------
+# Schema migration (SCHEMA_VERSION / PRAGMA user_version)
+# ---------------------------------------------------------------------------
+
+
+def test_schema_is_recreated_when_the_version_predates_this_build(tmp_path, caplog):
+    db = tmp_path / "bridge.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE releases (id TEXT PRIMARY KEY);"
+        "CREATE TABLE jobs (nzo_id TEXT PRIMARY KEY);"
+        "PRAGMA user_version = 1;"
+    )
+    conn.execute("INSERT INTO releases (id) VALUES ('old')")
+    conn.commit()
+    conn.close()
+
+    with caplog.at_level(logging.WARNING):
+        store = SqliteStore(str(db))
+
+    assert "dropping" in caplog.text.lower()
+    assert store.get_release("old") is None
+    store.close()
+
+
+def test_a_fresh_database_is_stamped_without_a_warning(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        store = SqliteStore(str(tmp_path / "bridge.db"))
+
+    assert caplog.text == ""
+    assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    store.close()
+
+
+def test_reopening_a_current_database_keeps_its_rows(tmp_path):
+    path = str(tmp_path / "bridge.db")
+    first = SqliteStore(path)
+    release_id = first.put(make_release())
+    first.close()
+
+    second = SqliteStore(path)
+    assert second.get_release(release_id) is not None
+    second.close()
