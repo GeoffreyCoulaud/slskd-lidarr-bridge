@@ -51,6 +51,19 @@ class AudioFile:
 
 
 @dataclass(frozen=True)
+class Disc:
+    """One disc of an album: a placement decision plus the files it holds.
+
+    ``subpath`` is the album-root-relative folder the files belong in, already
+    sanitized for the local filesystem (e.g. ``"CD1"``). It is empty for a
+    single-disc album, whose files sit directly in the album folder.
+    """
+
+    subpath: str
+    files: tuple[AudioFile, ...]
+
+
+@dataclass(frozen=True)
 class SearchResponse:
     username: str
     has_free_upload_slot: bool
