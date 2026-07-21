@@ -26,7 +26,7 @@ class FakeGateway:
         transfers_by_username: dict[str, list[Transfer]] | None = None,
     ) -> None:
         self._transfers = transfers_by_username or {}
-        self.enqueued: list[tuple[str, list[AudioFile]]] = []
+        self.enqueued: list[tuple[str, list[AudioFile], str | None]] = []
         self.cancelled: list[tuple[str, str]] = []
         # Optional service reference — when set, I/O methods assert not locked.
         self.service: DownloadService | None = None
@@ -49,9 +49,14 @@ class FakeGateway:
     def search_responses(self, search_id: str) -> list[SearchResponse]:
         return []
 
-    def enqueue(self, username: str, files: list[AudioFile]) -> None:
+    def enqueue(
+        self,
+        username: str,
+        files: list[AudioFile],
+        destination: str | None = None,
+    ) -> None:
         self._assert_not_locked()
-        self.enqueued.append((username, list(files)))
+        self.enqueued.append((username, list(files), destination))
 
     def transfers(self, username: str) -> list[Transfer]:
         self._assert_not_locked()
@@ -180,8 +185,9 @@ def test_start_enqueues_files_on_gateway():
     service.start(SAMPLE_PAYLOAD, "music")
 
     assert len(gateway.enqueued) == 1
-    username, files = gateway.enqueued[0]
+    username, files, destination = gateway.enqueued[0]
     assert username == "alice"
+    assert destination is None
     assert len(files) == 2
     assert all(isinstance(f, AudioFile) for f in files)
     assert files[0].filename == r"@@a\Artist\Album\01.flac"
@@ -542,8 +548,9 @@ def test_statuses_failed_transfer_is_retried_and_reported_downloading():
     assert v.state == "downloading"
     # start() enqueued once; the retry re-enqueues the failed file (2 total).
     assert len(gateway.enqueued) == 2
-    username, files = gateway.enqueued[1]
+    username, files, destination = gateway.enqueued[1]
     assert username == "alice"
+    assert destination is None
     assert [f.filename for f in files] == [r"@@a\Artist\Album\01.flac"]
 
 

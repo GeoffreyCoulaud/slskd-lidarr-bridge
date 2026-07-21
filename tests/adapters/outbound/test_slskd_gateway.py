@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
 
-from slskd_lidarr_bridge.adapters.outbound.slskd_gateway import SlskdGateway
+from slskd_lidarr_bridge.adapters.outbound.slskd_gateway import (
+    EnqueueError,
+    SlskdGateway,
+)
 from slskd_lidarr_bridge.domain.models import AudioFile
 
 BASE_URL = "http://slskd:5030"
@@ -18,6 +23,12 @@ def make_gateway() -> tuple[SlskdGateway, httpx.Client]:
     client = httpx.Client(base_url=BASE_URL)
     gw = SlskdGateway(BASE_URL, API_KEY, client=client)
     return gw, client
+
+
+def _gateway(**kwargs):
+    return SlskdGateway(
+        "http://slskd", "key", client=httpx.Client(base_url="http://slskd"), **kwargs
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -252,33 +263,105 @@ def test_search_responses_parses_responses():
 # ---------------------------------------------------------------------------
 
 
-@respx.mock
-def test_enqueue_posts_file_list():
-    username = "peer1"
-    route = respx.post(f"{BASE_URL}/api/v0/transfers/downloads/{username}").mock(
-        return_value=httpx.Response(201)
+def test_enqueue_posts_a_batch_with_its_destination(respx_mock) -> None:
+    route = respx_mock.post("http://slskd/api/v0/transfers/downloads/batches").mock(
+        return_value=httpx.Response(201, json={"batch": {}, "failures": []})
     )
-    gw, _ = make_gateway()
-    files = [
-        AudioFile(
-            filename=r"@@peer1\Music\file.flac", size=30000000, extension=".flac"
-        ),
-        AudioFile(
-            filename=r"@@peer1\Music\file2.flac", size=25000000, extension=".flac"
-        ),
-    ]
-    gw.enqueue(username, files)
+    gateway = _gateway()
+
+    gateway.enqueue(
+        "bob",
+        [AudioFile(filename=r"@@a\Album\01.flac", size=5)],
+        "Album [bob]/CD1",
+    )
 
     assert route.called
-    import json
+    assert json.loads(route.calls[0].request.content) == {
+        "username": "bob",
+        "files": [{"filename": r"@@a\Album\01.flac", "size": 5}],
+        "options": {"destination": "Album [bob]/CD1"},
+    }
 
-    request = route.calls.last.request
-    body = json.loads(request.content)
-    assert body == [
-        {"filename": r"@@peer1\Music\file.flac", "size": 30000000},
-        {"filename": r"@@peer1\Music\file2.flac", "size": 25000000},
-    ]
-    assert request.headers["x-api-key"] == API_KEY
+
+def test_enqueue_omits_options_without_a_destination(respx_mock) -> None:
+    route = respx_mock.post("http://slskd/api/v0/transfers/downloads/batches").mock(
+        return_value=httpx.Response(201, json={"batch": {}, "failures": []})
+    )
+
+    _gateway().enqueue("bob", [AudioFile(filename="x.flac", size=1)])
+
+    assert "options" not in json.loads(route.calls[0].request.content)
+
+
+def test_enqueue_raises_when_slskd_enqueued_nothing(respx_mock) -> None:
+    # 200 means every file failed, not success. A bare raise_for_status would
+    # read it as a win.
+    respx_mock.post("http://slskd/api/v0/transfers/downloads/batches").mock(
+        return_value=httpx.Response(
+            200,
+            json={"batch": {}, "failures": [{"filename": "x.flac", "message": "nope"}]},
+        )
+    )
+
+    with pytest.raises(EnqueueError, match="nope"):
+        _gateway().enqueue("bob", [AudioFile(filename="x.flac", size=1)], "Album")
+
+
+def test_enqueue_raises_on_a_partial_batch(respx_mock) -> None:
+    respx_mock.post("http://slskd/api/v0/transfers/downloads/batches").mock(
+        return_value=httpx.Response(
+            207,
+            json={"batch": {}, "failures": [{"filename": "b.flac", "message": "busy"}]},
+        )
+    )
+
+    with pytest.raises(EnqueueError, match="busy"):
+        _gateway().enqueue("bob", [AudioFile(filename="b.flac", size=1)], "Album")
+
+
+def test_enqueue_raises_when_the_peer_is_offline(respx_mock) -> None:
+    respx_mock.post("http://slskd/api/v0/transfers/downloads/batches").mock(
+        return_value=httpx.Response(404, text="User bob appears to be offline")
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _gateway().enqueue("bob", [AudioFile(filename="x.flac", size=1)], "Album")
+
+
+def test_enqueue_retries_when_slskd_throttles(respx_mock) -> None:
+    slept: list[float] = []
+    respx_mock.post("http://slskd/api/v0/transfers/downloads/batches").mock(
+        side_effect=[
+            httpx.Response(429, text="Only one concurrent operation is permitted"),
+            httpx.Response(201, json={"batch": {}, "failures": []}),
+        ]
+    )
+    gateway = _gateway(enqueue_retry_delays=(0.01, 0.02), sleep=slept.append)
+
+    gateway.enqueue("bob", [AudioFile(filename="x.flac", size=1)], "Album")
+
+    assert slept == [0.01]
+
+
+def test_enqueue_gives_up_after_exhausting_its_retries(respx_mock) -> None:
+    slept: list[float] = []
+    respx_mock.post("http://slskd/api/v0/transfers/downloads/batches").mock(
+        return_value=httpx.Response(429, text="throttled")
+    )
+    gateway = _gateway(enqueue_retry_delays=(0.01, 0.02), sleep=slept.append)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        gateway.enqueue("bob", [AudioFile(filename="x.flac", size=1)], "Album")
+
+    assert slept == [0.01, 0.02]
+
+
+def test_version_reads_the_application_version(respx_mock) -> None:
+    respx_mock.get("http://slskd/api/v0/application/version").mock(
+        return_value=httpx.Response(200, json="0.26.0")
+    )
+
+    assert _gateway().version() == "0.26.0"
 
 
 # ---------------------------------------------------------------------------
@@ -474,33 +557,6 @@ def test_downloads_directory_raises_on_500():
 # ---------------------------------------------------------------------------
 # Path-segment encoding — security / robustness hardening
 # ---------------------------------------------------------------------------
-
-
-@respx.mock
-def test_enqueue_encodes_traversal_username():
-    """Traversal username must be percent-encoded, not traversed.
-
-    ``../../api/v0/options`` as a username should produce a request to
-    ``/api/v0/transfers/downloads/..%2F..%2Fapi%2Fv0%2Foptions``, NOT to
-    ``/api/v0/options`` or any other traversed path.
-    """
-    malicious_username = "../../api/v0/options"
-    # The exact encoded path the gateway MUST produce
-    expected_path = "/api/v0/transfers/downloads/..%2F..%2Fapi%2Fv0%2Foptions"
-    route = respx.post(f"{BASE_URL}{expected_path}").mock(
-        return_value=httpx.Response(201)
-    )
-    # Register the "traversed" path as unmatched so a wrong call would raise
-    gw, _ = make_gateway()
-    files = [AudioFile(filename="file.flac", size=1000, extension=".flac")]
-    gw.enqueue(malicious_username, files)
-
-    assert route.called, "enqueue must POST to the percent-encoded path"
-    actual_raw_path = route.calls.last.request.url.raw_path
-    # raw_path preserves percent-encoding; url.path decodes it (misleading but correct)
-    assert actual_raw_path == expected_path.encode(), (
-        "enqueue must send the path with %2F intact, not traversed"
-    )
 
 
 @respx.mock

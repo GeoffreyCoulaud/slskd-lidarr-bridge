@@ -27,7 +27,9 @@ class FakeGateway:
     def search_responses(self, sid: str) -> list:
         return []
 
-    def enqueue(self, username: str, files: list) -> None:
+    def enqueue(
+        self, username: str, files: list, destination: str | None = None
+    ) -> None:
         pass
 
     def transfers(self, username: str) -> list:
@@ -85,7 +87,9 @@ class ExplodingGateway:
     def search_responses(self, sid: str) -> list:
         return []
 
-    def enqueue(self, username: str, files: list) -> None:
+    def enqueue(
+        self, username: str, files: list, destination: str | None = None
+    ) -> None:
         pass
 
     def transfers(self, username: str) -> list:
