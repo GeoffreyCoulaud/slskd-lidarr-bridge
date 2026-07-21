@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import runpy
 import sqlite3
 
+import httpx
 import pytest
 import waitress
 from flask import Flask
@@ -57,6 +59,84 @@ class TestBuildApp:
     def test_build_app_raises_on_missing_env(self):
         with pytest.raises(ValueError, match="SLSKD_URL"):
             build_app({})
+
+
+class _VersionGateway:
+    def __init__(self, version):
+        self._version = version
+
+    def version(self):
+        if isinstance(self._version, Exception):
+            raise self._version
+        return self._version
+
+
+def test_build_app_refuses_a_slskd_older_than_the_minimum(
+    monkeypatch, tmp_path
+) -> None:
+    env = {
+        "SLSKD_URL": "http://localhost:5030",
+        "SLSKD_API_KEY": "test-key",
+    }
+    monkeypatch.setattr(
+        main_module, "SlskdGateway", lambda *a, **k: _VersionGateway("0.25.1")
+    )
+
+    with pytest.raises(RuntimeError, match="0.26.0"):
+        main_module.build_app(env, db_path=str(tmp_path / "b.db"))
+
+
+@pytest.mark.parametrize("reported", ["0.0.0", "not-a-version"])
+def test_build_app_accepts_an_unrecognisable_version_with_a_warning(
+    monkeypatch, tmp_path, caplog, reported
+) -> None:
+    env = {
+        "SLSKD_URL": "http://localhost:5030",
+        "SLSKD_API_KEY": "test-key",
+    }
+    monkeypatch.setattr(
+        main_module, "SlskdGateway", lambda *a, **k: _VersionGateway(reported)
+    )
+
+    with caplog.at_level(logging.WARNING):
+        main_module.build_app(env, db_path=str(tmp_path / "b.db"))
+
+    assert "version" in caplog.text.lower()
+
+
+def test_build_app_continues_when_slskd_is_unreachable(
+    monkeypatch, tmp_path, caplog
+) -> None:
+    # A container that starts before slskd must not crash-loop.
+    env = {
+        "SLSKD_URL": "http://localhost:5030",
+        "SLSKD_API_KEY": "test-key",
+    }
+    monkeypatch.setattr(
+        main_module,
+        "SlskdGateway",
+        lambda *a, **k: _VersionGateway(httpx.ConnectError("down")),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        main_module.build_app(env, db_path=str(tmp_path / "b.db"))
+
+    assert "could not read" in caplog.text.lower()
+
+
+def test_build_app_accepts_a_supported_version(monkeypatch, tmp_path, caplog) -> None:
+    env = {
+        "SLSKD_URL": "http://localhost:5030",
+        "SLSKD_API_KEY": "test-key",
+    }
+    monkeypatch.setattr(
+        main_module, "SlskdGateway", lambda *a, **k: _VersionGateway("0.26.1")
+    )
+
+    with caplog.at_level(logging.WARNING):
+        main_module.build_app(env, db_path=str(tmp_path / "b.db"))
+
+    assert caplog.text == ""
 
 
 class TestMain:
