@@ -3,7 +3,7 @@
 # removes almost the entire Debian OS-package CVE surface (see SECURITY.md). The
 # app is pure-Python + stdlib C modules (sqlite3/uuid/expat/zlib), so musl is a
 # safe swap — validated by the full test suite running inside this image.
-FROM python:3.14-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92 AS builder
+FROM python:3.14-alpine@sha256:a1321512d6a287428c50dcdf2ab3857761127e03a23b1f648e9c1c0de59288f8 AS builder
 
 # Install uv from the official image, pinned to the version that resolved
 # uv.lock so `uv sync --frozen` is byte-for-byte reproducible. The -alpine
@@ -23,7 +23,7 @@ COPY src/ ./src/
 RUN uv sync --no-dev --frozen
 
 # ---- runtime ----
-FROM python:3.14-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+FROM python:3.14-alpine@sha256:a1321512d6a287428c50dcdf2ab3857761127e03a23b1f648e9c1c0de59288f8
 
 # Copy the entire /app tree (venv + installed project source) from builder
 COPY --from=builder /app /app
